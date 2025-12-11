@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 
 import {
     NavigationMenu,
@@ -14,13 +14,6 @@ import {
 } from "@/components/ui/navigation-menu";
 
 import { cn } from "@/lib/utils";
-import {
-    ConnectWallet,
-    Wallet,
-    WalletDropdown,
-    WalletDropdownDisconnect,
-} from "@coinbase/onchainkit/wallet";
-import { Address, Avatar, Identity, Name } from "@coinbase/onchainkit/identity";
 
 const components: { title: string; href: string; description: string }[] = [
     {
@@ -38,31 +31,36 @@ const components: { title: string; href: string; description: string }[] = [
 ];
 
 export default function Navbar() {
+    const { ready, authenticated, login, logout, user } = usePrivy();
+    const [mounted, setMounted] = React.useState(false);
+
+    React.useEffect(() => {
+        setMounted(true);
+    }, []);
+
     return (
         <div className="bg-bg w-screen">
             <NavigationMenu className="z-[5] m750:max-w-[300px] mx-auto">
                 <NavigationMenuList className="m750:max-w-[300px]">
                     <NavigationMenuItem>
-                        <Link href="/" legacyBehavior passHref>
-                            <NavigationMenuLink
-                                className={navigationMenuTriggerStyle()}
-                            >
-                                <span className="m750:max-w-[80px] m750:text-xs">
-                                    fundl.us
-                                </span>
-                            </NavigationMenuLink>
-                        </Link>
+                        <NavigationMenuLink
+                            className={navigationMenuTriggerStyle()}
+                            href="/"
+                        >
+                            <span className="m750:max-w-[80px] m750:text-xs">
+                                fundl.us
+                            </span>
+                        </NavigationMenuLink>
                     </NavigationMenuItem>
                     <NavigationMenuItem>
-                        <Link href="/projects" legacyBehavior passHref>
-                            <NavigationMenuLink
-                                className={navigationMenuTriggerStyle()}
-                            >
-                                <span className="m750:max-w-[80px] m750:text-xs">
-                                    View Projects
-                                </span>
-                            </NavigationMenuLink>
-                        </Link>
+                        <NavigationMenuLink
+                            className={navigationMenuTriggerStyle()}
+                            href="/projects"
+                        >
+                            <span className="m750:max-w-[80px] m750:text-xs">
+                                View Projects
+                            </span>
+                        </NavigationMenuLink>
                     </NavigationMenuItem>
                     <NavigationMenuItem>
                         <NavigationMenuTrigger className="m750:max-w-[80px] m750:text-xs">
@@ -83,25 +81,47 @@ export default function Navbar() {
                         </NavigationMenuContent>
                     </NavigationMenuItem>
                     <NavigationMenuItem>
-                        <Wallet>
-                            <div className="inline-flex items-center justify-center whitespace-nowrap rounded-base text-sm font-base ring-offset-white transition-all gap-2 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-bw text-text border-2 border-border shadow-shadow hover:translate-x-boxShadowX hover:translate-y-boxShadowY hover:shadow-non">
-                                <ConnectWallet className="bg-inherit hover:bg-inherit">
-                                    <Avatar className="h-6 w-6" />
-                                    <Name className="text-black" />
-                                </ConnectWallet>
+                        {!mounted || !ready ? (
+                            <div
+                                className={cn(
+                                    navigationMenuTriggerStyle(),
+                                    "cursor-default opacity-60"
+                                )}
+                            >
+                                <span className="m750:max-w-[80px] m750:text-xs">
+                                    Loading
+                                </span>
                             </div>
-                            <WalletDropdown>
-                                <Identity
-                                    className="px-4 pt-3 pb-2"
-                                    hasCopyAddressOnClick
-                                >
-                                    <Avatar />
-                                    <Name />
-                                    <Address />
-                                </Identity>
-                                <WalletDropdownDisconnect />
-                            </WalletDropdown>
-                        </Wallet>
+                        ) : !authenticated ? (
+                            <button
+                                onClick={login}
+                                className={cn(
+                                    navigationMenuTriggerStyle(),
+                                    "cursor-pointer"
+                                )}
+                            >
+                                <span className="m750:max-w-[80px] m750:text-xs">
+                                    Login
+                                </span>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={logout}
+                                className={cn(
+                                    navigationMenuTriggerStyle(),
+                                    "cursor-pointer"
+                                )}
+                            >
+                                <span className="m750:max-w-[80px] m750:text-xs">
+                                    {user?.wallet?.address
+                                        ? `${user.wallet.address.slice(
+                                              0,
+                                              6
+                                          )}...${user.wallet.address.slice(-4)}`
+                                        : "Logout"}
+                                </span>
+                            </button>
+                        )}
                     </NavigationMenuItem>
                 </NavigationMenuList>
             </NavigationMenu>

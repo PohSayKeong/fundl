@@ -1,16 +1,7 @@
 "use client";
 
-import { Avatar, Name } from "@coinbase/onchainkit/identity";
-import {
-    Transaction,
-    TransactionButton,
-    TransactionSponsor,
-    TransactionStatus,
-    TransactionStatusAction,
-    TransactionStatusLabel,
-} from "@coinbase/onchainkit/transaction";
-import { Wallet, ConnectWallet } from "@coinbase/onchainkit/wallet";
 import { useAccount } from "wagmi";
+import { usePrivy } from "@privy-io/react-auth";
 import { baseSepolia } from "viem/chains";
 import { encodeFunctionData, parseEther } from "viem";
 import { useState } from "react";
@@ -21,34 +12,53 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 export default function CreateProject() {
-    const { address } = useAccount();
+    const { address, isConnected } = useAccount();
+    const { login, sendTransaction } = usePrivy();
     const [tokenAddress, setTokenAddress] = useState(MockTokenAddress);
     const [projectName, setProjectName] = useState("");
     const [projectDescription, setProjectDescription] = useState("");
     const [projectImage, setProjectImage] = useState("");
     const [projectMilestones, setProjectMilestones] = useState("");
     const [goalTarget, setGoalTarget] = useState("");
+    const [isCreating, setIsCreating] = useState(false);
 
-    const createProject = address
-        ? [
-              {
-                  to: FundlAddress as `0x${string}`,
-                  data: encodeFunctionData({
-                      abi: FundlABI,
-                      functionName: "createProject",
-                      args: [
-                          address as `0x${string}`,
-                          projectName || "",
-                          projectDescription || "",
-                          projectImage || "",
-                          projectMilestones || "",
-                          parseEther(goalTarget || "0"),
-                      ],
-                  }),
-                  chainId: baseSepolia.id,
-              },
-          ]
-        : [];
+    const handleCreateProject = async () => {
+        if (!address || !sendTransaction) return;
+
+        try {
+            setIsCreating(true);
+            const data = encodeFunctionData({
+                abi: FundlABI,
+                functionName: "createProject",
+                args: [
+                    address as `0x${string}`,
+                    projectName || "",
+                    projectDescription || "",
+                    projectImage || "",
+                    projectMilestones || "",
+                    parseEther(goalTarget || "0"),
+                ],
+            });
+
+            await sendTransaction({
+                to: FundlAddress as `0x${string}`,
+                value: BigInt(0),
+                chainId: baseSepolia.id,
+                data: data,
+            });
+
+            // Reset form on success
+            setProjectName("");
+            setProjectDescription("");
+            setProjectImage("");
+            setProjectMilestones("");
+            setGoalTarget("");
+        } catch (err) {
+            console.error("Error creating project:", err);
+        } finally {
+            setIsCreating(false);
+        }
+    };
 
     return (
         <div className="relative min-h-screen bg-bg p-6">
@@ -179,39 +189,23 @@ export default function CreateProject() {
                                 />
                             </div>
 
-                            {/* OnchainKit Transaction Component */}
-                            {address ? (
-                                <Transaction
-                                    // capabilities={{
-                                    //     paymasterService: {
-                                    //         url: process.env
-                                    //             .PAYMASTER_AND_BUNDLER_ENDPOINT as string,
-                                    //     },
-                                    // }}
-                                    isSponsored={true}
-                                    chainId={baseSepolia.id}
-                                    calls={createProject}
+                            {isConnected ? (
+                                <Button
+                                    onClick={handleCreateProject}
+                                    disabled={
+                                        isCreating ||
+                                        !projectName ||
+                                        !goalTarget
+                                    }
+                                    className="w-full"
                                 >
-                                    <Button>
-                                        <TransactionButton
-                                            className="w-full bg-inherit hover:bg-inherit p-0"
-                                            text="Create Bounty"
-                                        />
-                                    </Button>
-                                    <TransactionSponsor />
-                                    <TransactionStatus>
-                                        <TransactionStatusLabel />
-                                        <TransactionStatusAction />
-                                    </TransactionStatus>
-                                </Transaction>
+                                    {isCreating
+                                        ? "Creating..."
+                                        : "Create Project"}
+                                </Button>
                             ) : (
-                                <Button>
-                                    <Wallet>
-                                        <ConnectWallet className="bg-inherit hover:bg-inherit">
-                                            <Avatar className="h-6 w-6" />
-                                            <Name />
-                                        </ConnectWallet>
-                                    </Wallet>
+                                <Button onClick={login} className="w-full">
+                                    Login with Privy to Create Project
                                 </Button>
                             )}
                         </form>

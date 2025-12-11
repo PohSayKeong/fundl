@@ -3,15 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useAccount } from "wagmi";
-import {
-    Transaction,
-    TransactionButton,
-    TransactionStatus,
-    TransactionStatusAction,
-    TransactionStatusLabel,
-} from "@coinbase/onchainkit/transaction";
-import { Wallet, ConnectWallet } from "@coinbase/onchainkit/wallet";
-import { Avatar, Name } from "@coinbase/onchainkit/identity";
+import { usePrivy } from "@privy-io/react-auth";
 import { baseSepolia } from "viem/chains";
 import {
     createPublicClient,
@@ -52,6 +44,7 @@ export type Project = [
 export default function ProjectPage() {
     const { id } = useParams();
     const { address, isConnected } = useAccount();
+    const { login, sendTransaction } = usePrivy();
     const [project, setProject] = useState<Project | null>(null);
     const [projectData, setProjectData] = useState<Project | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +55,7 @@ export default function ProjectPage() {
     const [availableToCollect, setAvailableToCollect] = useState<string>("0");
     const [isOwner, setIsOwner] = useState(false);
     const [hasRequestedRefund, setHasRequestedRefund] = useState(false);
+    const [isTransactionLoading, setIsTransactionLoading] = useState(false);
 
     // Create a public client
     const publicClient = createPublicClient({
@@ -220,6 +214,84 @@ export default function ProjectPage() {
                   },
               ]
             : [];
+
+    // Handle fund project transaction
+    const handleFundProject = async () => {
+        if (!sendTransaction || fundProjectCall.length === 0) return;
+
+        try {
+            setIsTransactionLoading(true);
+            await sendTransaction({
+                to: FundlAddress as `0x${string}`,
+                value: BigInt(0),
+                chainId: baseSepolia.id,
+                data: fundProjectCall[1].data,
+            });
+            setFundAmount("");
+        } catch (err) {
+            console.error("Error funding project:", err);
+        } finally {
+            setIsTransactionLoading(false);
+        }
+    };
+
+    // Handle collect funds transaction
+    const handleCollectFunds = async () => {
+        if (!sendTransaction || collectFundsCall.length === 0) return;
+
+        try {
+            setIsTransactionLoading(true);
+            await sendTransaction({
+                to: FundlAddress as `0x${string}`,
+                value: BigInt(0),
+                chainId: baseSepolia.id,
+                data: collectFundsCall[0].data,
+            });
+        } catch (err) {
+            console.error("Error collecting funds:", err);
+        } finally {
+            setIsTransactionLoading(false);
+        }
+    };
+
+    // Handle complete milestone transaction
+    const handleCompleteMilestone = async () => {
+        if (!sendTransaction || completeMilestoneCall.length === 0) return;
+
+        try {
+            setIsTransactionLoading(true);
+            await sendTransaction({
+                to: FundlAddress as `0x${string}`,
+                value: BigInt(0),
+                chainId: baseSepolia.id,
+                data: completeMilestoneCall[0].data,
+            });
+        } catch (err) {
+            console.error("Error completing milestone:", err);
+        } finally {
+            setIsTransactionLoading(false);
+        }
+    };
+
+    // Handle request refund transaction
+    const handleRequestRefund = async () => {
+        if (!sendTransaction || requestRefundCall.length === 0) return;
+
+        try {
+            setIsTransactionLoading(true);
+            await sendTransaction({
+                to: FundlAddress as `0x${string}`,
+                value: BigInt(0),
+                chainId: baseSepolia.id,
+                data: requestRefundCall[0].data,
+            });
+            setHasRequestedRefund(true);
+        } catch (err) {
+            console.error("Error requesting refund:", err);
+        } finally {
+            setIsTransactionLoading(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -384,22 +456,17 @@ export default function ProjectPage() {
                                         />
                                     </div>
 
-                                    <Transaction
-                                        isSponsored={true}
-                                        chainId={baseSepolia.id}
-                                        calls={fundProjectCall}
+                                    <Button
+                                        className="w-full"
+                                        onClick={handleFundProject}
+                                        disabled={
+                                            isTransactionLoading || !fundAmount
+                                        }
                                     >
-                                        <Button className="w-full">
-                                            <TransactionButton
-                                                className="w-full bg-inherit hover:bg-inherit p-0"
-                                                text="Fund Project 💰"
-                                            />
-                                        </Button>
-                                        <TransactionStatus>
-                                            <TransactionStatusLabel />
-                                            <TransactionStatusAction />
-                                        </TransactionStatus>
-                                    </Transaction>
+                                        {isTransactionLoading
+                                            ? "Processing..."
+                                            : "Fund Project 💰"}
+                                    </Button>
 
                                     <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
                                         <p className="font-bold text-sm">
@@ -444,25 +511,15 @@ export default function ProjectPage() {
                                             </p>
                                         </div>
                                     ) : (
-                                        <Transaction
-                                            isSponsored={true}
-                                            chainId={baseSepolia.id}
-                                            calls={requestRefundCall}
-                                            onSuccess={() =>
-                                                setHasRequestedRefund(true)
-                                            }
+                                        <Button
+                                            className="w-full bg-red-100 hover:bg-red-200"
+                                            onClick={handleRequestRefund}
+                                            disabled={isTransactionLoading}
                                         >
-                                            <Button className="w-full bg-red-100 hover:bg-red-200">
-                                                <TransactionButton
-                                                    className="w-full bg-inherit hover:bg-inherit p-0"
-                                                    text="Request Refund ⚠️"
-                                                />
-                                            </Button>
-                                            <TransactionStatus>
-                                                <TransactionStatusLabel />
-                                                <TransactionStatusAction />
-                                            </TransactionStatus>
-                                        </Transaction>
+                                            {isTransactionLoading
+                                                ? "Processing..."
+                                                : "Request Refund ⚠️"}
+                                        </Button>
                                     )}
 
                                     <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
@@ -511,22 +568,15 @@ export default function ProjectPage() {
                                     {/* Complete Milestone Button */}
                                     {Number(project[7]) <
                                         Number(project[6]) && (
-                                        <Transaction
-                                            isSponsored={true}
-                                            chainId={baseSepolia.id}
-                                            calls={completeMilestoneCall}
+                                        <Button
+                                            className="w-full bg-blue-100 hover:bg-blue-200"
+                                            onClick={handleCompleteMilestone}
+                                            disabled={isTransactionLoading}
                                         >
-                                            <Button className="w-full bg-blue-100 hover:bg-blue-200">
-                                                <TransactionButton
-                                                    className="w-full bg-inherit hover:bg-inherit p-0"
-                                                    text="Complete Current Milestone 🏆"
-                                                />
-                                            </Button>
-                                            <TransactionStatus>
-                                                <TransactionStatusLabel />
-                                                <TransactionStatusAction />
-                                            </TransactionStatus>
-                                        </Transaction>
+                                            {isTransactionLoading
+                                                ? "Processing..."
+                                                : "Complete Current Milestone 🏆"}
+                                        </Button>
                                     )}
 
                                     {/* Available to collect section */}
@@ -539,34 +589,18 @@ export default function ProjectPage() {
                                         </p>
                                     </div>
 
-                                    <Transaction
-                                        isSponsored={true}
-                                        chainId={baseSepolia.id}
-                                        calls={collectFundsCall}
+                                    <Button
+                                        className="w-full"
+                                        disabled={
+                                            parseFloat(availableToCollect) <=
+                                                0 || isTransactionLoading
+                                        }
+                                        onClick={handleCollectFunds}
                                     >
-                                        <Button
-                                            className="w-full"
-                                            disabled={
-                                                parseFloat(
-                                                    availableToCollect
-                                                ) <= 0
-                                            }
-                                        >
-                                            <TransactionButton
-                                                className="w-full bg-inherit hover:bg-inherit p-0"
-                                                text="Collect Available Funds 💸"
-                                                disabled={
-                                                    parseFloat(
-                                                        availableToCollect
-                                                    ) <= 0
-                                                }
-                                            />
-                                        </Button>
-                                        <TransactionStatus>
-                                            <TransactionStatusLabel />
-                                            <TransactionStatusAction />
-                                        </TransactionStatus>
-                                    </Transaction>
+                                        {isTransactionLoading
+                                            ? "Processing..."
+                                            : "Collect Available Funds 💸"}
+                                    </Button>
 
                                     <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
                                         <p className="font-bold text-sm">
@@ -604,13 +638,8 @@ export default function ProjectPage() {
                                     Connect your wallet to fund this project or
                                     collect funds if you&#39;re the owner.
                                 </p>
-                                <Button>
-                                    <Wallet>
-                                        <ConnectWallet className="bg-inherit hover:bg-inherit">
-                                            <Avatar className="h-6 w-6" />
-                                            <Name />
-                                        </ConnectWallet>
-                                    </Wallet>
+                                <Button onClick={login}>
+                                    Login with Privy
                                 </Button>
                             </div>
                         )}
