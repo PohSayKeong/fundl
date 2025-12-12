@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { PrivyProvider } from "@privy-io/react-auth";
-import { baseSepolia, anvil } from "wagmi/chains";
+import { baseSepolia, anvil, getChain } from "@/lib/chainConfig";
 import { WagmiProvider, createConfig, http } from "wagmi";
 
 // Create Wagmi config
@@ -16,8 +16,7 @@ const config = createConfig({
 
 export function Providers(props: { children: ReactNode }) {
     // Use localhost for development, Sepolia for production
-    const defaultChain =
-        process.env.NODE_ENV === "production" ? baseSepolia : anvil;
+    const defaultChain = getChain();
 
     return (
         <WagmiProvider config={config}>

@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { createPublicClient, formatEther, http } from "viem";
-import { baseSepolia } from "viem/chains";
+import { getChain } from "@/lib/chainConfig";
 import { FundlABI, FundlAddress } from "@/lib/calls";
 import { Project } from "../projects/[id]/page";
 
@@ -160,7 +160,7 @@ const BoostProjectPage = () => {
 
     // Create a public client to interact with the blockchain
     const publicClient = createPublicClient({
-        chain: baseSepolia,
+        chain: getChain(),
         transport: http(),
     });
 

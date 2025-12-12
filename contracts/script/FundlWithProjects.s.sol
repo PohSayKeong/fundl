@@ -12,55 +12,59 @@ contract FundlWithProjectsScript is Script {
     function setUp() public {}
 
     function run() public {
-        // Start broadcast to record transactions
-        vm.startBroadcast();
+        // Define addresses
+        address deployer = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        address funder = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
 
-        // Deploy the mock token
+        // --- Deploy contracts as deployer ---
+        vm.startBroadcast(deployer);
         mockToken = new MockERC20("FundlMockToken", "FMT");
-
-        // Deploy Fundl contract
         fundl = new Fundl();
-
         // Mint tokens to deployer and funder
-        mockToken.mint(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, 1500 ether);
-        mockToken.mint(0x1e527408BFC6Fcaf91a7Fb0c80D11F57E8f171Cb, 1500 ether);
+        mockToken.mint(deployer, 1500 ether);
+        mockToken.mint(funder, 1500 ether);
+        vm.stopBroadcast();
 
-        // Create projects as deployer
+        // --- Create projects as deployer and funder ---
+        // Project 1 (deployer)
+        vm.startBroadcast(deployer);
+        fundl.createProject(
+            address(mockToken),
+            300 ether,
+            block.timestamp + 90 days
+        );
+        vm.stopBroadcast();
 
-        // Approve token spending
+        // Project 2 (deployer)
+        vm.startBroadcast(deployer);
+        fundl.createProject(
+            address(mockToken),
+            200 ether,
+            block.timestamp + 60 days
+        );
+        vm.stopBroadcast();
+
+        // Project 3 (funder)
+        vm.startBroadcast(funder);
+        fundl.createProject(
+            address(mockToken),
+            100 ether,
+            block.timestamp + 120 days
+        );
+        vm.stopBroadcast();
+
+        // --- Approve and fund projects ---
+        // Approve token spending for deployer
+        vm.startBroadcast(deployer);
         mockToken.approve(address(fundl), 1500 ether);
-
-        // Create Project 1: Ad Infinitum (90 day duration)
-        fundl.createProject(
-            address(mockToken),
-            300 ether, // 300 tokens goal
-            block.timestamp + 90 days // ends in 90 days
-        );
-
-        // Create Project 2: Hardware Card Wallets (60 day duration)
-        fundl.createProject(
-            address(mockToken),
-            200 ether, // 200 tokens goal
-            block.timestamp + 60 days // ends in 60 days
-        );
-
-        // Create Project 3: Aetheria (120 day duration)
-        fundl.createProject(
-            address(mockToken),
-            100 ether, // 100 tokens goal
-            block.timestamp + 120 days // ends in 120 days
-        );
-
-        // Fund Project 1
         fundl.fundl(0, 100 ether);
-
-        // Fund Project 2
         fundl.fundl(1, 50 ether);
+        vm.stopBroadcast();
 
-        // Fund Project 3
+        // Approve and fund project 3 as funder
+        vm.startBroadcast(funder);
+        mockToken.approve(address(fundl), 1500 ether);
         fundl.fundl(2, 25 ether);
-
-        // Stop broadcast
         vm.stopBroadcast();
 
         // Print summary

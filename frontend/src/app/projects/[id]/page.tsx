@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
-import { useAccount } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
-import { baseSepolia } from "viem/chains";
+import { getChain, getChainId } from "@/lib/chainConfig";
 import {
     createPublicClient,
     encodeFunctionData,
@@ -24,27 +23,14 @@ import {
     MockTokenAddress,
 } from "@/lib/calls";
 
-// Define project type based on the contract struct
-export type Project = [
-    tokenAddress: `0x${string}`,
-    owner: `0x${string}`,
-    name: string,
-    description: string,
-    imageUrl: string,
-    isInProgress: boolean,
-    milestones: bigint,
-    currentMilestone: bigint,
-    goalAmount: bigint,
-    raisedAmount: bigint,
-    currentMilestoneStartTime: bigint,
-    timeLastCollected: bigint,
-    amountCollectedForMilestone: bigint
-];
+import type { Project, SerializedProject } from "@/lib/projectTypes";
+import { deserializeProject } from "@/lib/projectTypes";
 
 export default function ProjectPage() {
     const { id } = useParams();
-    const { address, isConnected } = useAccount();
-    const { login, sendTransaction } = usePrivy();
+    const { login, sendTransaction, user, ready } = usePrivy();
+    const address = user?.wallet?.address || null;
+    const isConnected = !!address && ready;
     const [project, setProject] = useState<Project | null>(null);
     const [projectData, setProjectData] = useState<Project | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -58,10 +44,14 @@ export default function ProjectPage() {
     const [isTransactionLoading, setIsTransactionLoading] = useState(false);
 
     // Create a public client
-    const publicClient = createPublicClient({
-        chain: baseSepolia,
-        transport: http(),
-    });
+    const publicClient = useMemo(
+        () =>
+            createPublicClient({
+                chain: getChain(),
+                transport: http(),
+            }),
+        []
+    );
 
     // Fetch project data using publicClient
     useEffect(() => {
@@ -76,8 +66,7 @@ export default function ProjectPage() {
                     functionName: "projects",
                     args: [BigInt(id as string)],
                 });
-
-                setProjectData(data as Project);
+                setProjectData(deserializeProject(data as SerializedProject));
                 setIsLoading(false);
                 setIsError(false);
             } catch (err) {
@@ -88,7 +77,7 @@ export default function ProjectPage() {
         }
 
         fetchProjectData();
-    }, [id]);
+    }, [id, publicClient]);
 
     // Update state based on fetched project data
     useEffect(() => {
@@ -104,7 +93,9 @@ export default function ProjectPage() {
         }
 
         setProject(projectData);
-        setIsOwner(address?.toLowerCase() === projectData[1]?.toLowerCase());
+        setIsOwner(
+            address?.toLowerCase() === projectData?.owner?.toLowerCase()
+        );
         setLoading(false);
     }, [projectData, isLoading, isError, address]);
 
@@ -114,19 +105,9 @@ export default function ProjectPage() {
             if (!project || !isOwner) return;
 
             try {
-                const milestoneAmount = project[8] / BigInt(project[6]); // goalAmount / milestones
-                const timeElapsed =
-                    BigInt(Math.floor(Date.now() / 1000)) - project[11]; // current time - timeLastCollected
-                const amountToBeCollected =
-                    (milestoneAmount * timeElapsed) / BigInt(60 * 24 * 60 * 60); // 60 days in seconds
+                // TODO: add this logic
 
-                // Subtract already collected amount for this milestone
-                const netCollectable =
-                    amountToBeCollected > project[12]
-                        ? amountToBeCollected - project[12]
-                        : BigInt(0);
-
-                setAvailableToCollect(formatEther(netCollectable));
+                setAvailableToCollect("0");
             } catch (err) {
                 console.error("Error calculating available funds:", err);
             }
@@ -152,7 +133,7 @@ export default function ProjectPage() {
                               parseEther(fundAmount || "0"),
                           ],
                       }),
-                      chainId: baseSepolia.id,
+                      chainId: getChainId(),
                   },
                   // Then fund the project
                   {
@@ -165,7 +146,7 @@ export default function ProjectPage() {
                               parseEther(fundAmount || "0"),
                           ],
                       }),
-                      chainId: baseSepolia.id,
+                      chainId: getChainId(),
                   },
               ]
             : [];
@@ -180,22 +161,7 @@ export default function ProjectPage() {
                           functionName: "collectFunding",
                           args: [BigInt(id as string)],
                       }),
-                      chainId: baseSepolia.id,
-                  },
-              ]
-            : [];
-
-    const completeMilestoneCall =
-        address && isOwner
-            ? [
-                  {
-                      to: FundlAddress as `0x${string}`,
-                      data: encodeFunctionData({
-                          abi: FundlABI,
-                          functionName: "completeMilestone",
-                          args: [BigInt(id as string)],
-                      }),
-                      chainId: baseSepolia.id,
+                      chainId: getChainId(),
                   },
               ]
             : [];
@@ -210,7 +176,7 @@ export default function ProjectPage() {
                           functionName: "createRefundRequest",
                           args: [BigInt(id as string)],
                       }),
-                      chainId: baseSepolia.id,
+                      chainId: getChainId(),
                   },
               ]
             : [];
@@ -224,7 +190,7 @@ export default function ProjectPage() {
             await sendTransaction({
                 to: FundlAddress as `0x${string}`,
                 value: BigInt(0),
-                chainId: baseSepolia.id,
+                chainId: getChainId(),
                 data: fundProjectCall[1].data,
             });
             setFundAmount("");
@@ -244,30 +210,11 @@ export default function ProjectPage() {
             await sendTransaction({
                 to: FundlAddress as `0x${string}`,
                 value: BigInt(0),
-                chainId: baseSepolia.id,
+                chainId: getChainId(),
                 data: collectFundsCall[0].data,
             });
         } catch (err) {
             console.error("Error collecting funds:", err);
-        } finally {
-            setIsTransactionLoading(false);
-        }
-    };
-
-    // Handle complete milestone transaction
-    const handleCompleteMilestone = async () => {
-        if (!sendTransaction || completeMilestoneCall.length === 0) return;
-
-        try {
-            setIsTransactionLoading(true);
-            await sendTransaction({
-                to: FundlAddress as `0x${string}`,
-                value: BigInt(0),
-                chainId: baseSepolia.id,
-                data: completeMilestoneCall[0].data,
-            });
-        } catch (err) {
-            console.error("Error completing milestone:", err);
         } finally {
             setIsTransactionLoading(false);
         }
@@ -282,7 +229,7 @@ export default function ProjectPage() {
             await sendTransaction({
                 to: FundlAddress as `0x${string}`,
                 value: BigInt(0),
-                chainId: baseSepolia.id,
+                chainId: getChainId(),
                 data: requestRefundCall[0].data,
             });
             setHasRequestedRefund(true);
@@ -326,38 +273,40 @@ export default function ProjectPage() {
 
     // Calculate funding progress percentage
     const progressPercentage =
-        project[9] > BigInt(0) && project[8] > BigInt(0)
-            ? Math.min(Number((project[9] * BigInt(100)) / project[8]), 100)
+        project &&
+        project.raisedAmount > BigInt(0) &&
+        project.goalAmount > BigInt(0)
+            ? Math.min(
+                  Number(
+                      (project.raisedAmount * BigInt(100)) / project.goalAmount
+                  ),
+                  100
+              )
             : 0;
 
     return (
         <div className="min-h-screen bg-bg p-6">
-            <Card className="max-w-4xl w-full mx-auto my-8">
-                {/* Project Header */}
-                <div className="relative flex flex-col items-center mb-6">
-                    <div className="w-full overflow-hidden bg-blue-100 border-b-4 border-black">
-                        {project[4] && (
-                            <img
-                                src={project[4]}
-                                alt={project[2]}
-                                className="w-full h-full object-cover"
-                            />
-                        )}
-                    </div>
-                    <h1 className="text-4xl font-extrabold mt-6 mb-2">
-                        {project[2]}
-                    </h1>
+            <Card className="max-w-4xl w-full mx-auto my-8 grid md:grid-cols-2 gap-8">
+                {/* Project Image */}
+                {project.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                        src={project.imageUrl}
+                        alt={project.name}
+                        className="object-contain my-auto"
+                    />
+                )}
+
+                {/* Project Details */}
+                <div>
+                    <h1 className="text-4xl font-extrabold">{project.name}</h1>
                     <p className="mb-4">
                         Created by:{" "}
                         <span className="font-bold">
-                            {project[1].substring(0, 6)}...
-                            {project[1].substring(38)}
+                            {project.owner.substring(0, 6)}...
+                            {project.owner.substring(38)}
                         </span>
                     </p>
-                </div>
-
-                {/* Project Details */}
-                <div className="grid md:grid-cols-2 gap-8 p-6">
                     <div className="space-y-6">
                         <div>
                             <h2 className="text-2xl font-extrabold mb-2">
@@ -365,7 +314,7 @@ export default function ProjectPage() {
                             </h2>
                             <div className="bg-yellow-50 border-4 border-black p-4 rounded-lg">
                                 <p className="whitespace-pre-wrap">
-                                    {project[3]}
+                                    {project.description}
                                 </p>
                             </div>
                         </div>
@@ -376,36 +325,15 @@ export default function ProjectPage() {
                             </h2>
                             <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 border-4 border-black rounded-lg">
                                 <div>
-                                    <p className="font-bold">Status:</p>
-                                    <p
-                                        className={`${
-                                            project[5]
-                                                ? "text-green-600"
-                                                : "text-red-600"
-                                        } font-bold`}
-                                    >
-                                        {project[5]
-                                            ? "In Progress"
-                                            : "Completed"}
-                                    </p>
-                                </div>
-                                <div>
-                                    <p className="font-bold">Milestones:</p>
-                                    <p className="font-bold">
-                                        {Number(project[7])} of{" "}
-                                        {Number(project[6])}
-                                    </p>
-                                </div>
-                                <div>
                                     <p className="font-bold">Goal Amount:</p>
                                     <p className="font-bold">
-                                        {formatEther(project[8])} FMT
+                                        {formatEther(project.goalAmount)} FMT
                                     </p>
                                 </div>
                                 <div>
                                     <p className="font-bold">Raised So Far:</p>
                                     <p className="font-bold">
-                                        {formatEther(project[9])} FMT
+                                        {formatEther(project.raisedAmount)} FMT
                                     </p>
                                 </div>
                             </div>
@@ -420,230 +348,198 @@ export default function ProjectPage() {
                                     style={{ width: `${progressPercentage}%` }}
                                 ></div>
                                 <div className="absolute inset-0 flex items-center justify-center font-extrabold text-black">
-                                    {formatEther(project[9])} /{" "}
-                                    {formatEther(project[8])} FMT
+                                    {formatEther(project.raisedAmount)} /{" "}
+                                    {formatEther(project.goalAmount)} FMT
                                 </div>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <div className="space-y-6">
-                        {/* Non-Owner: Fund Project Section */}
-                        {isConnected && !isOwner && (
-                            <div className="bg-green-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                                <h2 className="text-2xl font-extrabold mb-4">
-                                    🚀 Support This Project
-                                </h2>
-                                <div className="space-y-4">
-                                    <div>
-                                        <Label
-                                            htmlFor="fundAmount"
-                                            className="block font-bold mb-2"
-                                        >
-                                            Amount to Fund (FMT)
-                                        </Label>
-                                        <Input
-                                            id="fundAmount"
-                                            type="number"
-                                            step="0.01"
-                                            min="0"
-                                            className="w-full"
-                                            placeholder="0.0"
-                                            value={fundAmount}
-                                            onChange={(e) =>
-                                                setFundAmount(e.target.value)
-                                            }
-                                        />
-                                    </div>
-
-                                    <Button
-                                        className="w-full"
-                                        onClick={handleFundProject}
-                                        disabled={
-                                            isTransactionLoading || !fundAmount
-                                        }
+                {/* Action Section */}
+                <div className="space-y-6 md:col-span-2">
+                    {/* Non-Owner: Fund Project Section */}
+                    {isConnected && !isOwner && (
+                        <div className="bg-green-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                            <h2 className="text-2xl font-extrabold mb-4">
+                                🚀 Support This Project
+                            </h2>
+                            <div className="space-y-4">
+                                <div>
+                                    <Label
+                                        htmlFor="fundAmount"
+                                        className="block font-bold mb-2"
                                     >
-                                        {isTransactionLoading
-                                            ? "Processing..."
-                                            : "Fund Project 💰"}
-                                    </Button>
-
-                                    <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
-                                        <p className="font-bold text-sm">
-                                            📝 How funding works:
-                                        </p>
-                                        <ol className="list-decimal pl-4 text-sm mt-1">
-                                            <li>
-                                                Approve tokens to be spent by
-                                                the contract
-                                            </li>
-                                            <li>
-                                                Fund the project with your
-                                                approved tokens
-                                            </li>
-                                            <li>
-                                                The project owner can collect
-                                                funds over time
-                                            </li>
-                                        </ol>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Funder: Request Refund Section */}
-                        {isConnected && !isOwner && (
-                            <div className="bg-red-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mt-6">
-                                <h2 className="text-2xl font-extrabold mb-4">
-                                    🔄 Request Refund
-                                </h2>
-                                <div className="space-y-4">
-                                    {hasRequestedRefund ? (
-                                        <div className="p-4 bg-yellow-100 border-4 border-black">
-                                            <p className="font-bold">
-                                                ⚠️ You&apos;ve already requested
-                                                a refund for this project.
-                                            </p>
-                                            <p className="mt-2 text-sm">
-                                                If enough funders (50%) request
-                                                refunds, you&apos;ll be able to
-                                                claim your funds back.
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <Button
-                                            className="w-full bg-red-100 hover:bg-red-200"
-                                            onClick={handleRequestRefund}
-                                            disabled={isTransactionLoading}
-                                        >
-                                            {isTransactionLoading
-                                                ? "Processing..."
-                                                : "Request Refund ⚠️"}
-                                        </Button>
-                                    )}
-
-                                    <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
-                                        <p className="font-bold text-sm">
-                                            📝 How refunds work:
-                                        </p>
-                                        <ol className="list-decimal pl-4 text-sm mt-1">
-                                            <li>
-                                                You can request a refund if
-                                                you&apos;ve funded this project
-                                            </li>
-                                            <li>
-                                                If at least 50% of funders
-                                                request refunds, all funders can
-                                                claim their funds back
-                                            </li>
-                                            <li>
-                                                This is a community protection
-                                                mechanism if a project is
-                                                inactive or not delivering
-                                            </li>
-                                        </ol>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Owner: Project Controls Section */}
-                        {isConnected && isOwner && (
-                            <div className="bg-purple-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                                <h2 className="text-2xl font-extrabold mb-4">
-                                    🧙‍♂️ Project Owner Controls
-                                </h2>
-                                <div className="space-y-4">
-                                    {/* Current Milestone Info */}
-                                    <div className="p-4 bg-blue-100 border-4 border-black">
-                                        <p className="font-bold mb-1">
-                                            Current milestone:
-                                        </p>
-                                        <p className="text-2xl font-extrabold">
-                                            {Number(project[7])} of{" "}
-                                            {Number(project[6])}
-                                        </p>
-                                    </div>
-
-                                    {/* Complete Milestone Button */}
-                                    {Number(project[7]) <
-                                        Number(project[6]) && (
-                                        <Button
-                                            className="w-full bg-blue-100 hover:bg-blue-200"
-                                            onClick={handleCompleteMilestone}
-                                            disabled={isTransactionLoading}
-                                        >
-                                            {isTransactionLoading
-                                                ? "Processing..."
-                                                : "Complete Current Milestone 🏆"}
-                                        </Button>
-                                    )}
-
-                                    {/* Available to collect section */}
-                                    <div className="p-4 bg-white border-4 border-black mt-6">
-                                        <p className="font-bold mb-1">
-                                            Available to collect:
-                                        </p>
-                                        <p className="text-3xl font-extrabold">
-                                            {availableToCollect} FMT
-                                        </p>
-                                    </div>
-
-                                    <Button
+                                        Amount to Fund (FMT)
+                                    </Label>
+                                    <Input
+                                        id="fundAmount"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
                                         className="w-full"
-                                        disabled={
-                                            parseFloat(availableToCollect) <=
-                                                0 || isTransactionLoading
+                                        placeholder="0.0"
+                                        value={fundAmount}
+                                        onChange={(e) =>
+                                            setFundAmount(e.target.value)
                                         }
-                                        onClick={handleCollectFunds}
-                                    >
-                                        {isTransactionLoading
-                                            ? "Processing..."
-                                            : "Collect Available Funds 💸"}
-                                    </Button>
-
-                                    <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
-                                        <p className="font-bold text-sm">
-                                            📝 How milestones & funding work:
-                                        </p>
-                                        <ol className="list-decimal pl-4 text-sm mt-1">
-                                            <li>
-                                                Funds stream to you over time
-                                                based on your milestone schedule
-                                            </li>
-                                            <li>
-                                                Complete a milestone to move to
-                                                the next one and collect
-                                                remaining funds
-                                            </li>
-                                            <li>
-                                                The regular collect button lets
-                                                you collect funds that have
-                                                accrued since your last
-                                                collection
-                                            </li>
-                                        </ol>
-                                    </div>
+                                    />
                                 </div>
-                            </div>
-                        )}
 
-                        {/* Connect Wallet Section */}
-                        {!isConnected && (
-                            <div className="bg-blue-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                                <h2 className="text-2xl font-extrabold mb-4">
-                                    🔌 Connect Your Wallet
-                                </h2>
-                                <p className="mb-4">
-                                    Connect your wallet to fund this project or
-                                    collect funds if you&#39;re the owner.
-                                </p>
-                                <Button onClick={login}>
-                                    Login with Privy
+                                <Button
+                                    className="w-full"
+                                    onClick={handleFundProject}
+                                    disabled={
+                                        isTransactionLoading || !fundAmount
+                                    }
+                                >
+                                    {isTransactionLoading
+                                        ? "Processing..."
+                                        : "Fund Project 💰"}
                                 </Button>
+
+                                <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
+                                    <p className="font-bold text-sm">
+                                        📝 How funding works:
+                                    </p>
+                                    <ol className="list-decimal pl-4 text-sm mt-1">
+                                        <li>
+                                            Approve tokens to be spent by the
+                                            contract
+                                        </li>
+                                        <li>
+                                            Fund the project with your approved
+                                            tokens
+                                        </li>
+                                        <li>
+                                            The project owner can collect funds
+                                            over time
+                                        </li>
+                                    </ol>
+                                </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
+
+                    {/* Funder: Request Refund Section */}
+                    {isConnected && !isOwner && (
+                        <div className="bg-red-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mt-6">
+                            <h2 className="text-2xl font-extrabold mb-4">
+                                🔄 Request Refund
+                            </h2>
+                            <div className="space-y-4">
+                                {hasRequestedRefund ? (
+                                    <div className="p-4 bg-yellow-100 border-4 border-black">
+                                        <p className="font-bold">
+                                            ⚠️ You&apos;ve already requested a
+                                            refund for this project.
+                                        </p>
+                                        <p className="mt-2 text-sm">
+                                            If enough funders (50%) request
+                                            refunds, you&apos;ll be able to
+                                            claim your funds back.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <Button
+                                        className="w-full bg-red-100 hover:bg-red-200"
+                                        onClick={handleRequestRefund}
+                                        disabled={isTransactionLoading}
+                                    >
+                                        {isTransactionLoading
+                                            ? "Processing..."
+                                            : "Request Refund ⚠️"}
+                                    </Button>
+                                )}
+
+                                <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
+                                    <p className="font-bold text-sm">
+                                        📝 How refunds work:
+                                    </p>
+                                    <ol className="list-decimal pl-4 text-sm mt-1">
+                                        <li>
+                                            You can request a refund if
+                                            you&apos;ve funded this project
+                                        </li>
+                                        <li>
+                                            If at least 50% of funders request
+                                            refunds, all funders can claim their
+                                            funds back
+                                        </li>
+                                        <li>
+                                            This is a community protection
+                                            mechanism if a project is inactive
+                                            or not delivering
+                                        </li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Owner: Project Controls Section */}
+                    {isConnected && isOwner && (
+                        <div className="bg-purple-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                            <h2 className="text-2xl font-extrabold mb-4">
+                                🧙‍♂️ Project Owner Controls
+                            </h2>
+                            <div className="space-y-4">
+                                {/* Owner controls: Available to collect section */}
+
+                                {/* Available to collect section */}
+                                <div className="p-4 bg-white border-4 border-black mt-6">
+                                    <p className="font-bold mb-1">
+                                        Available to collect:
+                                    </p>
+                                    <p className="text-3xl font-extrabold">
+                                        {availableToCollect} FMT
+                                    </p>
+                                </div>
+
+                                <Button
+                                    className="w-full"
+                                    disabled={
+                                        parseFloat(availableToCollect) <= 0 ||
+                                        isTransactionLoading
+                                    }
+                                    onClick={handleCollectFunds}
+                                >
+                                    {isTransactionLoading
+                                        ? "Processing..."
+                                        : "Collect Available Funds 💸"}
+                                </Button>
+
+                                {/* Info: How funding works */}
+                                <div className="border-4 border-black p-3 bg-yellow-50 mt-4">
+                                    <p className="font-bold text-sm">
+                                        📝 How funding works:
+                                    </p>
+                                    <ol className="list-decimal pl-4 text-sm mt-1">
+                                        <li>Funds stream to you over time</li>
+                                        <li>
+                                            The regular collect button lets you
+                                            collect funds that have accrued
+                                            since your last collection
+                                        </li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Connect Wallet Section */}
+                    {!isConnected && (
+                        <div className="bg-blue-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                            <h2 className="text-2xl font-extrabold mb-4">
+                                🔌 Connect Your Wallet
+                            </h2>
+                            <p className="mb-4">
+                                Connect your wallet to fund this project or
+                                collect funds if you&#39;re the owner.
+                            </p>
+                            <Button onClick={login}>Login with Privy</Button>
+                        </div>
+                    )}
                 </div>
             </Card>
         </div>

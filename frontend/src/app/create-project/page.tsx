@@ -1,8 +1,7 @@
 "use client";
 
-import { useAccount } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
-import { baseSepolia } from "viem/chains";
+import { getChainId } from "@/lib/chainConfig";
 import { encodeFunctionData, parseEther } from "viem";
 import { useState } from "react";
 import { FundlABI, FundlAddress, MockTokenAddress } from "@/lib/calls";
@@ -12,8 +11,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 export default function CreateProject() {
-    const { address, isConnected } = useAccount();
-    const { login, sendTransaction } = usePrivy();
+    const { login, sendTransaction, user, ready } = usePrivy();
+    const address = user?.wallet?.address || null;
+    const isConnected = !!address && ready;
     const [tokenAddress, setTokenAddress] = useState(MockTokenAddress);
     const [projectName, setProjectName] = useState("");
     const [projectDescription, setProjectDescription] = useState("");
@@ -43,7 +43,7 @@ export default function CreateProject() {
             await sendTransaction({
                 to: FundlAddress as `0x${string}`,
                 value: BigInt(0),
-                chainId: baseSepolia.id,
+                chainId: getChainId(),
                 data: data,
             });
 
