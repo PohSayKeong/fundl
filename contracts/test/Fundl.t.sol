@@ -655,4 +655,31 @@ contract FundlTest is Test {
             "Project should not be halted; user3 funding should succeed"
         );
     }
+
+    // Test: user cannot fund after requesting refund
+    function testCannotFundAfterRefundRequest() public {
+        uint256 fundAmount = 10 ether;
+        // user1 funds the project
+        vm.prank(user1);
+        token.approve(address(fundl), fundAmount);
+        vm.prank(user1);
+        fundl.fundl(projectId, fundAmount);
+
+        // user2 funds the project
+        uint256 user2Amount = 30 ether;
+        vm.prank(user2);
+        token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
+        fundl.fundl(projectId, user2Amount);
+
+        // user1 requests a refund
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
+        // user1 tries to fund again (should revert)
+        vm.prank(user1);
+        token.approve(address(fundl), fundAmount);
+        vm.expectRevert(Fundl.AlreadyRequestedRefund.selector);
+        vm.prank(user1);
+        fundl.fundl(projectId, fundAmount);
+    }
 }

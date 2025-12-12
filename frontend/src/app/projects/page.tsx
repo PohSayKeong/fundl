@@ -9,7 +9,7 @@ import {
     Project,
     SerializedProject,
     deserializeProject,
-} from "@/lib/projectTypes";
+} from "@/types/projectTypes";
 import { getChain } from "@/lib/chainConfig";
 import { ProjectCard } from "@/components/ProjectCard";
 

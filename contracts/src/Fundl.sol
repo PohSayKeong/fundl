@@ -123,6 +123,8 @@ contract Fundl is ReentrancyGuard {
             revert FundingGoalExceeded();
         // If refund voting threshold is reached, disallow new funding
         if (_refundVoteActive(_projectId)) revert RefundVoteActive();
+        if (refundRequestByUsersByProject[_projectId][msg.sender])
+            revert AlreadyRequestedRefund();
 
         // Update funder bookkeeping
         fundingByUsersByProject[_projectId][msg.sender] += _amount;
