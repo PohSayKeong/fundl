@@ -1,191 +1,241 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    IERC20
+} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {
+    SafeERC20
+} from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import {
+    ReentrancyGuard
+} from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-// CrowdFunding Contract
+contract Fundl is ReentrancyGuard {
+    using SafeERC20 for IERC20;
 
-contract Fundl {
-    // Struct to represent a project
     struct Project {
-        // Project Related
-        address tokenAddress; // Address of the token contract
-        address owner; // Owner of the project
-        string name; // Name of the project
-        string description; // Description of the project
-        string imageUrl; // URL of the project image
-        bool isInProgress; // Is the project in progress
+        // Storage packed: two addresses in early slots
+        address tokenAddress;
+        address owner;
         // Funding Related
-        uint8 milestones; // Number of Milestones
-        uint8 currentMilestone; // Current milestone of the project
-        uint256 goalAmount; // Funding goal amount
-        uint256 raisedAmount; // Amount raised so far
+        uint256 goalAmount;
+        uint256 raisedAmount; // total currently accounted in contract (includes refunded not-yet-processed? we update on refunds)
+        uint256 ownerWithdrawn;
         // Time Related
-        uint256 currentMilestoneStartTime; // Current Milestone Start Time
-        uint256 timeLastCollected; // Time Last payment was collected
-        uint256 amountCollectedForMilestone; // Amount collected by the owner so far
+        uint256 startTime;
+        uint256 endTime;
     }
-    // - **Create Project** - State your minimum amount, ERC20 token, end date and information on project. A Project is represented as an NFT.
-    // - **Fundl** - Users fund the project with the specified token
-    // - **Payment Streaming** – Payment is Streamed every block to the project owner until End of Project.
-    // - **Milestone Based System** - Payment Streaming Rate and Threshold is dependent on milestone.
-    // - **Voting-based Refund** - Users can vote to stop the project for refund in case of lack of activity from the project.
-    // - **Interoperability / Multichain** – Supported by VIA Labs cross chain Tokens, users can crowdfund from any chain to Base.⬇️
 
-    // Mappings
+    // Storage
     mapping(uint256 => Project) public projects;
-    mapping(uint256 => mapping(address => uint256)) fundingByUsersByProject; // Funding by each user for each project
-    mapping(uint256 => mapping(address => bool)) refundRequestByUsersByProject; // Refund request by each user for each project
-    mapping(uint256 => uint128) refundRequestsByProject; // Refund requests for each project
-    mapping(uint256 => mapping(uint8 => uint128)) votesByMilestoneByProject; // votes for each milestone for each project
-    mapping(uint256 => uint128) fundersByProject; // Funders for each project
-    // Counter for project IDs
+    // user => amount funded for a project
+    mapping(uint256 => mapping(address => uint256))
+        public fundingByUsersByProject;
+    // did user request refund (voting + request)
+    mapping(uint256 => mapping(address => bool))
+        public refundRequestByUsersByProject;
+    // total amount currently requested for refund (sum of contributions for those who asked)
+    mapping(uint256 => uint256) public totalRefundRequestedAmount;
+    // amount owner has withdrawn so far (so we don't double-withdraw)
+    mapping(uint256 => uint256) public ownerWithdrawnAmount;
+
     uint256 public projectIdCounter;
 
+    event ProjectCreated(uint256 indexed projectId, address indexed owner);
+    event Funded(
+        uint256 indexed projectId,
+        address indexed funder,
+        uint256 amount
+    );
+    event RefundRequested(
+        uint256 indexed projectId,
+        address indexed funder,
+        uint256 amount
+    );
+    event Refunded(
+        uint256 indexed projectId,
+        address indexed funder,
+        uint256 amount
+    );
+    event Collected(
+        uint256 indexed projectId,
+        address indexed owner,
+        uint256 amount
+    );
+    event ProjectHalted(uint256 indexed projectId);
+
+    // Constants
+    uint256 private constant REFUND_DENOMINATOR = 2;
+
+    // Custom errors for gas efficiency
+    error InvalidToken();
+    error InvalidEndTime();
+    error ProjectNotFound();
+    error NotOwner();
+    error InvalidAmount();
+    error FundingGoalExceeded();
+    error NotFunder();
+    error RefundNotRequested();
+    error AlreadyRequestedRefund();
+    error InsufficientRefundVotes();
+    error NothingToCollect();
+    error RefundVoteActive();
+
+    function _refundVoteActive(uint256 _projectId) private view returns (bool) {
+        Project storage p = projects[_projectId];
+        uint256 raised = p.raisedAmount;
+        if (raised == 0) return false;
+        return
+            totalRefundRequestedAmount[_projectId] * REFUND_DENOMINATOR >=
+            raised;
+    }
+
+    // --- Create project ---
     function createProject(
         address _tokenAddress,
-        string memory _name,
-        string memory _description,
-        string memory _imageUrl,
-        uint8 _milestones,
-        uint256 _goalAmount
+        uint256 _goalAmount,
+        uint256 _endTime
     ) public {
-        // Add to Mapping with all information and projectId
-        // Mint NFT To user to represent ownership of the project
+        if (_tokenAddress == address(0)) revert InvalidToken();
+        if (_endTime <= block.timestamp) revert InvalidEndTime();
         projects[projectIdCounter] = Project({
-            // Project Related
             owner: msg.sender,
             tokenAddress: _tokenAddress,
-            name: _name,
-            description: _description,
-            imageUrl: _imageUrl,
-            isInProgress: true,
-            // Funding Related
-            milestones: _milestones,
-            currentMilestone: 0,
             goalAmount: _goalAmount,
             raisedAmount: 0,
-            // Time Related
-            currentMilestoneStartTime: block.timestamp,
-            timeLastCollected: block.timestamp,
-            amountCollectedForMilestone: 0
+            ownerWithdrawn: 0,
+            startTime: block.timestamp,
+            endTime: _endTime
         });
-        projectIdCounter++;
+        emit ProjectCreated(projectIdCounter, msg.sender);
+        unchecked {
+            projectIdCounter++;
+        }
     }
 
-    function completeMilestone(uint256 _projectId) public {
-        // Collect milestone money and increase rate
-        require(
-            msg.sender == projects[_projectId].owner,
-            "Only project owner can complete milestone"
-        );
-        uint256 amountToBeCollected = (projects[_projectId].goalAmount /
-            projects[_projectId].milestones) -
-            projects[_projectId].amountCollectedForMilestone;
-        IERC20(projects[_projectId].tokenAddress).transfer(
-            projects[_projectId].owner,
-            amountToBeCollected
-        );
-        // Increment milestone
-        projects[_projectId].currentMilestone++;
-        projects[_projectId].timeLastCollected = block.timestamp;
-        projects[_projectId].amountCollectedForMilestone = 0;
-    }
+    // --- Fund project ---
+    function fundl(uint256 _projectId, uint256 _amount) external nonReentrant {
+        Project storage p = projects[_projectId];
+        if (p.owner == address(0)) revert ProjectNotFound();
+        if (_amount == 0) revert InvalidAmount();
+        if (p.raisedAmount + _amount > p.goalAmount)
+            revert FundingGoalExceeded();
+        // If refund voting threshold is reached, disallow new funding
+        if (_refundVoteActive(_projectId)) revert RefundVoteActive();
 
-    function fundl(uint256 _projectId, uint256 _amount) public {
-        // Transfer tokens from user to project owner
-        // Mint backing token to user
-        // Update raised amount
-        // Update funding by user
-        require(
-            projects[_projectId].isInProgress,
-            "Project is not in progress"
-        );
-        require(_amount > 0, "Amount should be greater than 0");
-        require(
-            projects[_projectId].raisedAmount + _amount <=
-                projects[_projectId].goalAmount,
-            "Funding goal exceeded"
-        );
-        require(
-            IERC20(projects[_projectId].tokenAddress).transferFrom(
-                msg.sender,
-                address(this),
-                _amount
-            )
-        );
+        // Update funder bookkeeping
         fundingByUsersByProject[_projectId][msg.sender] += _amount;
-        fundersByProject[_projectId]++;
-        projects[_projectId].raisedAmount += _amount;
-    }
+        p.raisedAmount += _amount;
 
-    function collectFunding(uint256 _projectId) public {
-        // Transfer tokens to project owner for milestone
-        // Update amount collected for milestone
-        // Update last collected time
-        require(
-            msg.sender == projects[_projectId].owner,
-            "Only project owner can collect funding"
-        );
-        uint256 milestoneAmount = (projects[_projectId].goalAmount /
-            projects[_projectId].milestones);
-        uint256 amountToBeCollected = (milestoneAmount *
-            (block.timestamp - projects[_projectId].timeLastCollected)) /
-            60 days;
-        IERC20(projects[_projectId].tokenAddress).transfer(
-            projects[_projectId].owner,
-            amountToBeCollected
-        );
-        projects[_projectId].amountCollectedForMilestone += amountToBeCollected;
-        projects[_projectId].timeLastCollected = block.timestamp;
-    }
-
-    function createRefundRequest(uint256 _projectId) public {
-        // Increment refund request count
-        // Refund the user if half of the users vote for it
-        require(
-            projects[_projectId].isInProgress,
-            "Project is not in progress"
-        );
-        require(
-            fundingByUsersByProject[_projectId][msg.sender] > 0,
-            "You have not funded this project"
-        );
-        require(
-            !refundRequestByUsersByProject[_projectId][msg.sender],
-            "Refund request already created"
-        );
-        refundRequestByUsersByProject[_projectId][msg.sender] = true;
-        refundRequestsByProject[_projectId]++;
-    }
-
-    function refund(uint256 _projectId) public {
-        require(
-            projects[_projectId].isInProgress,
-            "Project is not in progress"
-        );
-        require(
-            fundingByUsersByProject[_projectId][msg.sender] > 0,
-            "You have not funded this project"
-        );
-        require(
-            fundersByProject[_projectId] > 2,
-            "Not enough funders for this project"
-        );
-        require(
-            refundRequestsByProject[_projectId] >=
-                fundersByProject[_projectId] / 2,
-            "Refund request not created"
-        );
-        // Refund users
-        uint256 amountToBeRefunded = fundingByUsersByProject[_projectId][
-            msg.sender
-        ];
-        IERC20(projects[_projectId].tokenAddress).transfer(
+        // Transfer tokens into contract
+        IERC20(p.tokenAddress).safeTransferFrom(
             msg.sender,
-            amountToBeRefunded
+            address(this),
+            _amount
         );
-        projects[_projectId].raisedAmount -= amountToBeRefunded;
-        fundingByUsersByProject[_projectId][msg.sender] = 0;
+
+        emit Funded(_projectId, msg.sender, _amount);
+    }
+
+    // --- Request refund (vote + mark) ---
+    // When a funder requests a refund, we add their funded amount to totalRefundRequestedAmount.
+    function createRefundRequest(uint256 _projectId) external nonReentrant {
+        Project storage p = projects[_projectId];
+        if (p.owner == address(0)) revert ProjectNotFound();
+        uint256 funded = fundingByUsersByProject[_projectId][msg.sender];
+        if (funded == 0) revert NotFunder();
+        if (refundRequestByUsersByProject[_projectId][msg.sender])
+            revert AlreadyRequestedRefund();
+
+        bool wasRefundVoteActive = _refundVoteActive(_projectId);
+
+        // Mark that the user has requested a refund
+        refundRequestByUsersByProject[_projectId][msg.sender] = true;
+        totalRefundRequestedAmount[_projectId] += funded;
+        emit RefundRequested(_projectId, msg.sender, funded);
+
+        // If this request causes the threshold to be crossed, emit halt and immediately refund the requester
+        if (!wasRefundVoteActive && _refundVoteActive(_projectId)) {
+            _processRefund(_projectId, msg.sender);
+        }
+    }
+
+    // --- Refund (when threshold reached) ---
+    // Any funder who requested a refund can call this once threshold is met
+    function refund(uint256 _projectId) external nonReentrant {
+        Project storage p = projects[_projectId];
+        if (p.owner == address(0)) revert ProjectNotFound();
+        uint256 funded = fundingByUsersByProject[_projectId][msg.sender];
+        if (funded == 0) revert NotFunder();
+        if (!refundRequestByUsersByProject[_projectId][msg.sender])
+            revert RefundNotRequested();
+        if (!_refundVoteActive(_projectId)) revert InsufficientRefundVotes();
+
+        _processRefund(_projectId, msg.sender);
+    }
+
+    // --- Owner collects streaming funds linearly over time (capped by raised amount and previous withdrawals) ---
+    function collectFunding(uint256 _projectId) external nonReentrant {
+        Project storage p = projects[_projectId];
+        if (p.owner == address(0)) revert ProjectNotFound();
+        if (msg.sender != p.owner) revert NotOwner();
+        // If refund voting threshold is reached, disallow owner collection to protect refunds
+        if (_refundVoteActive(_projectId)) revert RefundVoteActive();
+
+        uint256 toCollect = availableToOwner(_projectId);
+        if (toCollect == 0) revert NothingToCollect();
+
+        // update bookkeeping then transfer
+        ownerWithdrawnAmount[_projectId] += toCollect;
+
+        IERC20(p.tokenAddress).safeTransfer(p.owner, toCollect);
+
+        emit Collected(_projectId, p.owner, toCollect);
+    }
+
+    // Helper view: how much owner can withdraw now (earned vs reserved)
+    function availableToOwner(
+        uint256 _projectId
+    ) public view returns (uint256) {
+        Project storage p = projects[_projectId];
+        if (p.owner == address(0)) return 0;
+        // If refund vote active, owner withdrawals should be blocked
+        if (_refundVoteActive(_projectId)) return 0;
+        uint256 elapsed = block.timestamp > p.endTime
+            ? p.endTime - p.startTime
+            : block.timestamp - p.startTime;
+        uint256 duration = p.endTime - p.startTime;
+        if (duration == 0) return 0;
+
+        uint256 unlocked = (p.raisedAmount * elapsed) / duration;
+        uint256 alreadyWithdrawn = ownerWithdrawnAmount[_projectId];
+        if (unlocked <= alreadyWithdrawn) return 0;
+        return unlocked - alreadyWithdrawn;
+    }
+
+    function _processRefund(uint256 _projectId, address requester) private {
+        Project storage p = projects[_projectId];
+        uint256 funded = fundingByUsersByProject[_projectId][requester];
+        uint256 projectBalance = p.raisedAmount -
+            ownerWithdrawnAmount[_projectId];
+        if (projectBalance == 0) revert NothingToCollect();
+
+        // Calculate proportional refund
+        uint256 amountToSend = (funded * projectBalance) / p.raisedAmount;
+        if (amountToSend == 0) revert NothingToCollect();
+
+        // Safe subtraction: cap at zero
+        fundingByUsersByProject[_projectId][requester] -= amountToSend;
+
+        if (fundingByUsersByProject[_projectId][requester] == 0) {
+            refundRequestByUsersByProject[_projectId][requester] = false;
+        }
+        totalRefundRequestedAmount[_projectId] -= amountToSend;
+
+        p.raisedAmount -= amountToSend;
+
+        IERC20(p.tokenAddress).safeTransfer(requester, amountToSend);
+        emit Refunded(_projectId, requester, amountToSend);
     }
 }

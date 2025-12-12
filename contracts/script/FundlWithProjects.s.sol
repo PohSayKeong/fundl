@@ -30,34 +30,25 @@ contract FundlWithProjectsScript is Script {
         // Approve token spending
         mockToken.approve(address(fundl), 1500 ether);
 
-        // Create Project 1: Tech Startup
+        // Create Project 1: Ad Infinitum (90 day duration)
         fundl.createProject(
             address(mockToken),
-            "Ad Infinitum",
-            "A revolutionary AI Agent platform for developers",
-            "https://i.imgur.com/9GcO44P.jpeg",
-            3, // 3 milestones
-            300 ether // 300 tokens goal
+            300 ether, // 300 tokens goal
+            block.timestamp + 90 days // ends in 90 days
         );
 
-        // Create Project 2: Community Garden
+        // Create Project 2: Hardware Card Wallets (60 day duration)
         fundl.createProject(
             address(mockToken),
-            "Hardware Card Wallets",
-            "Hardware Wallet that happens to be an NFC Card! All funders who fund 10+ tokens get a free card!",
-            "https://i.imgur.com/CPhz19Ng.jpg",
-            2, // 2 milestones
-            200 ether // 200 tokens goal
+            200 ether, // 200 tokens goal
+            block.timestamp + 60 days // ends in 60 days
         );
 
-        // Create Project 3: Aetheria
+        // Create Project 3: Aetheria (120 day duration)
         fundl.createProject(
             address(mockToken),
-            "Aetheria",
-            "An open-world blockchain educational game.",
-            "https://i.imgur.com/uImH6Zf.jpeg",
-            4, // 4 milestones
-            100 ether // 100 tokens goal
+            100 ether, // 100 tokens goal
+            block.timestamp + 120 days // ends in 120 days
         );
 
         // Fund Project 1

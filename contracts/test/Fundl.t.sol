@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, console} from "../lib/forge-std/src/Test.sol";
 import {Fundl} from "../src/Fundl.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
@@ -17,6 +17,7 @@ contract FundlTest is Test {
     uint256 public projectId;
     uint256 public constant INITIAL_BALANCE = 1000 ether;
     uint256 public constant GOAL_AMOUNT = 100 ether;
+    uint256 public constant PROJECT_DURATION = 60 days;
 
     function setUp() public {
         fundl = new Fundl();
@@ -32,23 +33,14 @@ contract FundlTest is Test {
         token.mint(user1, INITIAL_BALANCE);
         token.mint(user2, INITIAL_BALANCE);
         token.mint(user3, INITIAL_BALANCE);
-        // Mint tokens to the contract for milestone completion and refunds
-        token.mint(address(fundl), INITIAL_BALANCE);
 
         // Create a project
         createTestProject();
     }
 
     function createTestProject() internal {
-        // Create a project with 4 milestones and 100 ether goal
-        fundl.createProject(
-            address(token),
-            "Test Project",
-            "A test project for testing",
-            "https://example.com/image.png",
-            4, // 4 milestones
-            GOAL_AMOUNT
-        );
+        uint256 endTime = block.timestamp + PROJECT_DURATION;
+        fundl.createProject(address(token), GOAL_AMOUNT, endTime);
         projectId = 0; // First project ID
     }
 
@@ -61,44 +53,30 @@ contract FundlTest is Test {
         returns (
             address tokenAddress,
             address projectOwner,
-            bool isInProgress,
-            uint8 milestones,
-            uint8 currentMilestone,
             uint256 goalAmount,
             uint256 raisedAmount,
-            uint256 timeLastCollected,
-            uint256 amountCollectedForMilestone
+            uint256 ownerWithdrawn,
+            uint256 startTime,
+            uint256 endTime
         )
     {
         (
             tokenAddress,
             projectOwner,
-            ,
-            ,
-            ,
-            isInProgress,
-            milestones,
-            currentMilestone,
             goalAmount,
             raisedAmount,
-            ,
-            timeLastCollected,
-            amountCollectedForMilestone
+            ownerWithdrawn,
+            startTime,
+            endTime
         ) = fundl.projects(_projectId);
     }
 
     // Test project creation
     function testCreateProject() public {
-        // Create a new project
         uint256 initialProjectCount = fundl.projectIdCounter();
-        fundl.createProject(
-            address(token),
-            "New Project",
-            "Another test project",
-            "https://example.com/image2.png",
-            2, // 2 milestones
-            50 ether
-        );
+        uint256 endTime = block.timestamp + 30 days;
+
+        fundl.createProject(address(token), 50 ether, endTime);
 
         // Check if project counter incremented
         assertEq(fundl.projectIdCounter(), initialProjectCount + 1);
@@ -107,34 +85,39 @@ contract FundlTest is Test {
         (
             address tokenAddress,
             address projectOwner,
-            string memory name,
-            string memory description,
-            string memory imageUrl,
-            bool isInProgress,
-            uint8 milestones,
-            uint8 currentMilestone,
             uint256 goalAmount,
             uint256 raisedAmount,
-            ,
-            ,
-
-        ) = fundl.projects(initialProjectCount);
+            uint256 ownerWithdrawn,
+            uint256 startTime,
+            uint256 projectEndTime
+        ) = getProject(initialProjectCount);
 
         assertEq(tokenAddress, address(token));
         assertEq(projectOwner, owner);
-        assertEq(name, "New Project");
-        assertEq(description, "Another test project");
-        assertEq(imageUrl, "https://example.com/image2.png");
-        assertTrue(isInProgress);
-        assertEq(milestones, 2);
-        assertEq(currentMilestone, 0);
         assertEq(goalAmount, 50 ether);
         assertEq(raisedAmount, 0);
+        assertEq(ownerWithdrawn, 0);
+        assertEq(startTime, block.timestamp);
+        assertEq(projectEndTime, endTime);
+    }
+
+    // Test creating project with invalid token
+    function testCreateProjectInvalidToken() public {
+        uint256 endTime = block.timestamp + 30 days;
+        vm.expectRevert(Fundl.InvalidToken.selector);
+        fundl.createProject(address(0), 50 ether, endTime);
+    }
+
+    // Test creating project with invalid end time
+    function testCreateProjectInvalidEndTime() public {
+        vm.expectRevert(Fundl.InvalidEndTime.selector);
+        fundl.createProject(address(token), 50 ether, block.timestamp);
     }
 
     // Test funding a project
     function testFundl() public {
         uint256 fundAmount = 25 ether;
+        uint256 ownerBalanceBefore = token.balanceOf(owner);
         uint256 fundlBalanceBefore = token.balanceOf(address(fundl));
 
         // Approve token transfer
@@ -144,16 +127,14 @@ contract FundlTest is Test {
         fundl.fundl(projectId, fundAmount);
 
         // Get project details
-        (, , , , , , uint256 raisedAmount, , ) = getProject(projectId);
+        (, , , uint256 raisedAmount, , , ) = getProject(projectId);
         assertEq(raisedAmount, fundAmount);
 
-        // Check token balance of this contract (owner) remained the same
-        // Note: The owner is this test contract which is both funding and receiving the funds
-        uint256 fundlBalanceAfter = token.balanceOf(address(fundl));
+        // Check balances
+        assertEq(token.balanceOf(owner), ownerBalanceBefore - fundAmount);
         assertEq(
-            fundlBalanceAfter,
-            fundlBalanceBefore + fundAmount,
-            "Fundl balance should increase by funded amount"
+            token.balanceOf(address(fundl)),
+            fundlBalanceBefore + fundAmount
         );
     }
 
@@ -162,11 +143,6 @@ contract FundlTest is Test {
         uint256 user1Amount = 20 ether;
         uint256 user2Amount = 30 ether;
         uint256 user3Amount = 10 ether;
-
-        uint256 user1BalanceBefore = token.balanceOf(user1);
-        uint256 user2BalanceBefore = token.balanceOf(user2);
-        uint256 user3BalanceBefore = token.balanceOf(user3);
-        uint256 fundlBalanceBefore = token.balanceOf(address(fundl));
 
         // User 1 funds
         vm.startPrank(user1);
@@ -187,434 +163,496 @@ contract FundlTest is Test {
         vm.stopPrank();
 
         // Get project details
-        (, , , , , , uint256 raisedAmount, , ) = getProject(projectId);
+        (, , , uint256 raisedAmount, , , ) = getProject(projectId);
         assertEq(raisedAmount, user1Amount + user2Amount + user3Amount);
 
-        // Check token balances
-        uint256 user1BalanceAfter = token.balanceOf(user1);
-        uint256 user2BalanceAfter = token.balanceOf(user2);
-        uint256 user3BalanceAfter = token.balanceOf(user3);
-        uint256 fundlBalanceAfter = token.balanceOf(address(fundl));
-
-        assertEq(
-            user1BalanceAfter,
-            user1BalanceBefore - user1Amount,
-            "User1 token balance should decrease"
-        );
-        assertEq(
-            user2BalanceAfter,
-            user2BalanceBefore - user2Amount,
-            "User2 token balance should decrease"
-        );
-        assertEq(
-            user3BalanceAfter,
-            user3BalanceBefore - user3Amount,
-            "User3 token balance should decrease"
-        );
-        assertEq(
-            fundlBalanceAfter,
-            fundlBalanceBefore + user1Amount + user2Amount + user3Amount,
-            "Fundl token balance should increase by total funded amount"
-        );
+        // Verify individual contributions
+        assertEq(fundl.fundingByUsersByProject(projectId, user1), user1Amount);
+        assertEq(fundl.fundingByUsersByProject(projectId, user2), user2Amount);
+        assertEq(fundl.fundingByUsersByProject(projectId, user3), user3Amount);
     }
 
     // Test funding with zero amount (should fail)
     function testFundlZeroAmount() public {
-        // Approve token transfer
         token.approve(address(fundl), 0);
-
-        // Try to fund with zero amount, should revert
-        vm.expectRevert("Amount should be greater than 0");
+        vm.expectRevert(Fundl.InvalidAmount.selector);
         fundl.fundl(projectId, 0);
     }
 
     // Test funding exceeding the goal amount (should fail)
     function testFundlExceedingGoal() public {
         uint256 exceedingAmount = GOAL_AMOUNT + 1;
-
-        // Approve token transfer
         token.approve(address(fundl), exceedingAmount);
-
-        // Try to fund exceeding goal amount, should revert
-        vm.expectRevert("Funding goal exceeded");
+        vm.expectRevert(Fundl.FundingGoalExceeded.selector);
         fundl.fundl(projectId, exceedingAmount);
     }
 
-    // Test completing a milestone
-    function testCompleteMilestone() public {
-        // Create a new test project for this test
-        uint256 testProjectId = fundl.projectIdCounter();
-        fundl.createProject(
-            address(token),
-            "Milestone Test Project",
-            "Testing milestone completion",
-            "https://example.com/image.png",
-            4, // 4 milestones
-            GOAL_AMOUNT
-        );
-
-        // Let's fund from a different account
-        vm.startPrank(user1);
-        token.approve(address(fundl), GOAL_AMOUNT);
-        fundl.fundl(testProjectId, GOAL_AMOUNT);
-        vm.stopPrank();
-
-        uint256 ownerBalanceBefore = token.balanceOf(owner);
-        uint256 milestoneAmount = GOAL_AMOUNT / 4; // 4 milestones
-
-        // Complete milestone
-        fundl.completeMilestone(testProjectId);
-
-        // Get project details after milestone completion
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 currentMilestone,
-            ,
-            ,
-            ,
-            uint256 amountCollectedForMilestone
-        ) = getProject(testProjectId);
-        assertEq(
-            currentMilestone,
-            1,
-            "Current milestone should be incremented"
-        );
-        assertEq(
-            amountCollectedForMilestone,
-            0,
-            "Amount collected should be reset to 0"
-        );
-
-        // Check owner balance increased by milestone amount
-        uint256 ownerBalanceAfter = token.balanceOf(owner);
-        assertEq(
-            ownerBalanceAfter,
-            ownerBalanceBefore + milestoneAmount,
-            "Owner should receive milestone amount"
-        );
+    // Test funding non-existent project
+    function testFundlNonExistentProject() public {
+        uint256 fundAmount = 10 ether;
+        token.approve(address(fundl), fundAmount);
+        vm.expectRevert(Fundl.ProjectNotFound.selector);
+        fundl.fundl(999, fundAmount);
     }
 
-    // Test non-owner trying to complete milestone (should fail)
-    function testNonOwnerCompleteMilestone() public {
-        // Fund the project first
-        uint256 fundAmount = 25 ether;
-        token.approve(address(fundl), fundAmount);
-        fundl.fundl(projectId, fundAmount);
+    // Test availableToOwner view function
+    function testAvailableToOwner() public {
+        // Fund the project
+        vm.prank(user1);
+        token.approve(address(fundl), GOAL_AMOUNT);
+        vm.prank(user1);
+        fundl.fundl(projectId, GOAL_AMOUNT);
 
-        // Try to complete milestone as non-owner
-        vm.startPrank(user1);
-        vm.expectRevert("Only project owner can complete milestone");
-        fundl.completeMilestone(projectId);
-        vm.stopPrank();
+        // At start, nothing available yet
+        assertEq(fundl.availableToOwner(projectId), 0);
+
+        // Warp to 25% through project (15 days out of 60)
+        vm.warp(block.timestamp + 15 days);
+        uint256 expectedAt25Percent = (GOAL_AMOUNT * 15 days) /
+            PROJECT_DURATION;
+        assertEq(fundl.availableToOwner(projectId), expectedAt25Percent);
+
+        // Warp to 50% through project
+        vm.warp(block.timestamp + 15 days); // Total 30 days
+        uint256 expectedAt50Percent = (GOAL_AMOUNT * 30 days) /
+            PROJECT_DURATION;
+        assertEq(fundl.availableToOwner(projectId), expectedAt50Percent);
+
+        // Warp past end time
+        vm.warp(block.timestamp + 100 days);
+        assertEq(fundl.availableToOwner(projectId), GOAL_AMOUNT);
     }
 
     // Test collecting funding
     function testCollectFunding() public {
-        // Create a new test project for this test
-        uint256 testProjectId = fundl.projectIdCounter();
-        fundl.createProject(
-            address(token),
-            "Collection Test Project",
-            "Testing funding collection",
-            "https://example.com/image.png",
-            4, // 4 milestones
-            GOAL_AMOUNT
-        );
-
-        // Fund from a different account
-        vm.startPrank(user1);
+        // Fund from user1
+        vm.prank(user1);
         token.approve(address(fundl), GOAL_AMOUNT);
-        fundl.fundl(testProjectId, GOAL_AMOUNT);
-        vm.stopPrank();
+        vm.prank(user1);
+        fundl.fundl(projectId, GOAL_AMOUNT);
 
         uint256 ownerBalanceBefore = token.balanceOf(owner);
 
-        // Warp time forward 30 days
-        uint256 startTime = block.timestamp;
-        console.log("Start time:", startTime);
-        vm.warp(startTime + 30 days);
-        console.log("New time after warp:", block.timestamp);
-        console.log("Time difference:", block.timestamp - startTime);
+        // Warp time forward 30 days (50% of 60 day duration)
+        vm.warp(block.timestamp + 30 days);
 
-        // Calculate expected amount
-        uint256 milestoneAmount = GOAL_AMOUNT / 4; // 4 milestones
-        console.log("Milestone amount:", milestoneAmount);
-        uint256 expectedAmount = (milestoneAmount * 30 days) / 60 days; // (Milestone amount * time elapsed) / milestone duration
-        console.log("Expected amount:", expectedAmount);
-
-        // Get initial state
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            uint256 timeLastCollectedBefore,
-            uint256 amountCollectedForMilestoneBefore
-        ) = getProject(testProjectId);
-        console.log("Time last collected before:", timeLastCollectedBefore);
-        console.log(
-            "Amount collected before:",
-            amountCollectedForMilestoneBefore
-        );
+        // Calculate expected amount (50% of goal)
+        uint256 expectedAmount = (GOAL_AMOUNT * 30 days) / PROJECT_DURATION;
 
         // Collect funding
-        fundl.collectFunding(testProjectId);
+        fundl.collectFunding(projectId);
 
-        // Get final state
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            uint256 timeLastCollected,
-            uint256 amountCollectedForMilestone
-        ) = getProject(testProjectId);
-        console.log("Time last collected after:", timeLastCollected);
-        console.log("Amount collected after:", amountCollectedForMilestone);
-
-        // For this test, we'll just verify the balance change since it's measurable
+        // Verify balance change
         uint256 ownerBalanceAfter = token.balanceOf(owner);
-        uint256 balanceChange = ownerBalanceAfter - ownerBalanceBefore;
-        console.log("Owner balance before:", ownerBalanceBefore);
-        console.log("Owner balance after:", ownerBalanceAfter);
-        console.log("Balance change:", balanceChange);
-
-        // Assert the balance change matches expected amount
         assertEq(
-            balanceChange,
+            ownerBalanceAfter - ownerBalanceBefore,
             expectedAmount,
-            "Owner should receive the collected amount"
+            "Owner should receive 50% of funds after 50% of time"
         );
+
+        // Verify tracking
+        assertEq(fundl.ownerWithdrawnAmount(projectId), expectedAmount);
+    }
+
+    // Test collecting multiple times
+    function testCollectFundingMultipleTimes() public {
+        vm.prank(user1);
+        token.approve(address(fundl), GOAL_AMOUNT);
+        vm.prank(user1);
+        fundl.fundl(projectId, GOAL_AMOUNT);
+
+        // Collect at 25%
+        vm.warp(block.timestamp + 15 days);
+        fundl.collectFunding(projectId);
+        uint256 firstCollection = fundl.ownerWithdrawnAmount(projectId);
+
+        // Collect at 50%
+        vm.warp(block.timestamp + 15 days);
+        fundl.collectFunding(projectId);
+        uint256 secondCollection = fundl.ownerWithdrawnAmount(projectId);
+
+        // Second collection should be more than first
+        assertGt(secondCollection, firstCollection);
     }
 
     // Test non-owner trying to collect funding (should fail)
     function testNonOwnerCollectFunding() public {
-        // Fund the project first
-        uint256 fundAmount = 25 ether;
-        token.approve(address(fundl), fundAmount);
-        fundl.fundl(projectId, fundAmount);
+        vm.prank(user1);
+        token.approve(address(fundl), 25 ether);
+        vm.prank(user1);
+        fundl.fundl(projectId, 25 ether);
 
-        // Try to collect funding as non-owner
-        vm.startPrank(user1);
-        vm.expectRevert("Only project owner can collect funding");
+        vm.warp(block.timestamp + 15 days);
+
+        vm.prank(user1);
+        vm.expectRevert(Fundl.NotOwner.selector);
         fundl.collectFunding(projectId);
-        vm.stopPrank();
     }
 
-    // Test refund request with single funder
-    function testCreateRefundRequestSingleFunder() public {
-        uint256 fundAmount = 25 ether;
+    // Test collecting with nothing available
+    function testCollectFundingNothingAvailable() public {
+        vm.prank(user1);
+        token.approve(address(fundl), 25 ether);
+        vm.prank(user1);
+        fundl.fundl(projectId, 25 ether);
 
-        // User 1 funds
-        vm.startPrank(user1);
+        // Try to collect immediately (nothing unlocked yet)
+        vm.expectRevert(Fundl.NothingToCollect.selector);
+        fundl.collectFunding(projectId);
+    }
+
+    // Test refund request
+    function testCreateRefundRequest() public {
+        uint256 fundAmount = 50 ether;
+
+        vm.prank(user1);
         token.approve(address(fundl), fundAmount);
+        vm.prank(user1);
         fundl.fundl(projectId, fundAmount);
 
-        // User 1 creates refund request
-        fundl.createRefundRequest(projectId);
-        vm.stopPrank();
+        uint256 refundAmount = 10 ether;
 
-        // Try to refund with only 1 funder (should fail due to minimum funders requirement)
-        vm.startPrank(user1);
-        vm.expectRevert("Not enough funders for this project");
-        fundl.refund(projectId);
-        vm.stopPrank();
+        vm.prank(user2);
+        token.approve(address(fundl), refundAmount);
+        vm.prank(user2);
+        fundl.fundl(projectId, refundAmount);
+
+        // refund request, project not halted yet
+        vm.prank(user2);
+        fundl.createRefundRequest(projectId);
+
+        // If threshold is not crossed, request is recorded
+        assertTrue(fundl.refundRequestByUsersByProject(projectId, user2));
+        assertEq(fundl.totalRefundRequestedAmount(projectId), refundAmount);
     }
 
-    // Test refund with two funders (both requesting refund)
-    function testRefundWithTwoFunders() public {
-        uint256 user1Amount = 20 ether;
-        uint256 user2Amount = 30 ether;
+    // Test refund with weighted voting (50% threshold)
+    function testRefundWeightedVoting() public {
+        uint256 user1Amount = 30 ether; // 30% of 100
+        uint256 user2Amount = 40 ether; // 40% of 100
+        uint256 user3Amount = 30 ether; // 30% of 100
 
-        // User 1 funds
-        vm.startPrank(user1);
+        // All users fund
+        vm.prank(user1);
         token.approve(address(fundl), user1Amount);
+        vm.prank(user1);
         fundl.fundl(projectId, user1Amount);
-        vm.stopPrank();
 
-        // User 2 funds
-        vm.startPrank(user2);
+        vm.prank(user2);
         token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
         fundl.fundl(projectId, user2Amount);
-        vm.stopPrank();
 
-        // Both users create refund requests
+        vm.prank(user3);
+        token.approve(address(fundl), user3Amount);
+        vm.prank(user3);
+        fundl.fundl(projectId, user3Amount);
+
+        // User1 and User2 request refunds (70% of funds)
         vm.prank(user1);
         fundl.createRefundRequest(projectId);
 
+        uint256 user2BalanceBefore = token.balanceOf(user2);
         vm.prank(user2);
         fundl.createRefundRequest(projectId);
 
-        // User 1 tries to get a refund but should fail because we need at least 3 funders
-        vm.startPrank(user1);
-        vm.expectRevert("Not enough funders for this project");
+        // Threshold should be reached (70% >= 50%)
+        // User2 refunded
+        assertEq(
+            fundl.fundingByUsersByProject(projectId, user2),
+            0,
+            "User2 should be refunded"
+        );
+        assertEq(
+            token.balanceOf(user2),
+            user2BalanceBefore + user2Amount,
+            "User2 should receive full refund"
+        );
+
+        // User1 can now claim refund
+        uint256 user1BalanceBefore = token.balanceOf(user1);
+        vm.prank(user1);
         fundl.refund(projectId);
-        vm.stopPrank();
+
+        assertEq(
+            token.balanceOf(user1),
+            user1BalanceBefore + user1Amount,
+            "User1 should receive full refund"
+        );
     }
 
-    // Test refund with three funders (minimum requirement met)
-    function testRefundWithThreeFunders() public {
-        // Create a new test project for this test
-        uint256 testProjectId = fundl.projectIdCounter();
-        fundl.createProject(
-            address(token),
-            "Refund Test Project",
-            "Testing refunds with three funders",
-            "https://example.com/image.png",
-            4, // 4 milestones
-            GOAL_AMOUNT
-        );
+    // Test partial refund when insufficient balance
+    function testPartialRefund() public {
+        uint256 user1Amount = 50 ether;
+        uint256 user2Amount = 50 ether;
 
-        uint256 user1Amount = 20 ether;
-        uint256 user2Amount = 30 ether;
-        uint256 user3Amount = 10 ether;
-
-        // Fund from three users
-        vm.startPrank(user1);
-        token.approve(address(fundl), user1Amount);
-        fundl.fundl(testProjectId, user1Amount);
-        vm.stopPrank();
-
-        vm.startPrank(user2);
-        token.approve(address(fundl), user2Amount);
-        fundl.fundl(testProjectId, user2Amount);
-        vm.stopPrank();
-
-        vm.startPrank(user3);
-        token.approve(address(fundl), user3Amount);
-        fundl.fundl(testProjectId, user3Amount);
-        vm.stopPrank();
-
-        // Two users create refund requests (2/3 > 50%)
+        // Both users fund
         vm.prank(user1);
-        fundl.createRefundRequest(testProjectId);
+        token.approve(address(fundl), user1Amount);
+        vm.prank(user1);
+        fundl.fundl(projectId, user1Amount);
 
         vm.prank(user2);
-        fundl.createRefundRequest(testProjectId);
+        token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
+        fundl.fundl(projectId, user2Amount);
 
-        // Get initial user balances
-        uint256 user1BalanceBeforeRefund = token.balanceOf(user1);
-
-        // For the test to pass we need to ensure funds are available in the contract for refunds
-        // Move tokens back to the contract (simulating that owner received them and sends them back)
-        vm.prank(owner);
-        token.transfer(address(fundl), user1Amount + user2Amount + user3Amount);
-
-        // User 1 requests refund
-        vm.startPrank(user1);
-        fundl.refund(testProjectId);
-        vm.stopPrank();
-
-        // Check if user1 was refunded properly
-        uint256 user1BalanceAfterRefund = token.balanceOf(user1);
+        // Owner collects some funds (warp time)
+        vm.warp(block.timestamp + PROJECT_DURATION / 2);
+        fundl.collectFunding(projectId);
+        uint256 ownerCollected = fundl.ownerWithdrawnAmount(projectId);
         assertEq(
-            user1BalanceAfterRefund,
-            user1BalanceBeforeRefund + user1Amount,
-            "User1 should receive refund amount"
+            ownerCollected,
+            (user1Amount + user2Amount) / 2,
+            "Owner should have collected half the funds"
         );
 
-        // Get project details after refund
-        (, , , , , , uint256 raisedAmount, , ) = getProject(testProjectId);
+        // User1 gets refund (partial due to owner withdrawal)
+        uint256 user1BalanceBefore = token.balanceOf(user1);
+        (, , , uint256 raisedAmount, , , ) = getProject(projectId);
+        uint256 availableBalance = raisedAmount - ownerCollected;
+        uint256 expectedRefund = (user1Amount * availableBalance) /
+            raisedAmount;
+
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
         assertEq(
-            raisedAmount,
-            user2Amount + user3Amount,
-            "Project raised amount should decrease by refunded amount"
+            token.balanceOf(user1),
+            user1BalanceBefore + expectedRefund,
+            "User1 should receive partial refund"
+        );
+
+        uint256 user2BalanceBefore = token.balanceOf(user2);
+        vm.prank(user2);
+        fundl.createRefundRequest(projectId);
+        assertGt(
+            token.balanceOf(user2),
+            user2BalanceBefore,
+            "User2 should receive some refund"
         );
     }
 
     // Test creating refund request without funding (should fail)
     function testCreateRefundRequestWithoutFunding() public {
-        vm.startPrank(user1);
-        vm.expectRevert("You have not funded this project");
+        vm.prank(user1);
+        vm.expectRevert(Fundl.NotFunder.selector);
         fundl.createRefundRequest(projectId);
-        vm.stopPrank();
     }
 
     // Test creating duplicate refund request (should fail)
     function testDuplicateRefundRequest() public {
-        uint256 fundAmount = 25 ether;
+        uint256 user1Amount = 10 ether;
+        uint256 user2Amount = 50 ether;
 
-        // User 1 funds
-        vm.startPrank(user1);
-        token.approve(address(fundl), fundAmount);
-        fundl.fundl(projectId, fundAmount);
+        // Both users fund
+        vm.prank(user1);
+        token.approve(address(fundl), user1Amount);
+        vm.prank(user1);
+        fundl.fundl(projectId, user1Amount);
+
+        vm.prank(user2);
+        token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
+        fundl.fundl(projectId, user2Amount);
 
         // First refund request should succeed
+        vm.prank(user1);
         fundl.createRefundRequest(projectId);
 
         // Second refund request should fail
-        vm.expectRevert("Refund request already created");
+        vm.prank(user1);
+        vm.expectRevert(Fundl.AlreadyRequestedRefund.selector);
         fundl.createRefundRequest(projectId);
-        vm.stopPrank();
     }
 
     // Test refunding without sufficient votes (should fail)
     function testRefundWithoutSufficientVotes() public {
-        // Create a new test project for this test
-        uint256 testProjectId = fundl.projectIdCounter();
-        fundl.createProject(
-            address(token),
-            "Insufficient Votes Test Project",
-            "Testing refund with insufficient votes",
-            "https://example.com/image.png",
-            4, // 4 milestones
-            GOAL_AMOUNT
-        );
-
         uint256 user1Amount = 20 ether;
-        uint256 user2Amount = 30 ether;
-        uint256 user3Amount = 10 ether;
+        uint256 user2Amount = 80 ether;
 
-        // Fund from three users
-        vm.startPrank(user1);
-        token.approve(address(fundl), user1Amount);
-        fundl.fundl(testProjectId, user1Amount);
-        vm.stopPrank();
-
-        vm.startPrank(user2);
-        token.approve(address(fundl), user2Amount);
-        fundl.fundl(testProjectId, user2Amount);
-        vm.stopPrank();
-
-        vm.startPrank(user3);
-        token.approve(address(fundl), user3Amount);
-        fundl.fundl(testProjectId, user3Amount);
-        vm.stopPrank();
-
-        // Only one user creates refund request (1/3 < 50%)
+        // Two users fund (20% and 80%)
         vm.prank(user1);
-        fundl.createRefundRequest(testProjectId);
+        token.approve(address(fundl), user1Amount);
+        vm.prank(user1);
+        fundl.fundl(projectId, user1Amount);
 
-        // For testing, make sure contract has funds
-        vm.prank(owner);
-        token.transfer(address(fundl), user1Amount);
+        vm.prank(user2);
+        token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
+        fundl.fundl(projectId, user2Amount);
 
-        // Make sure funds available
-        uint256 contractBalance = token.balanceOf(address(fundl));
-        console.log("Contract token balance:", contractBalance);
+        // Only user1 requests refund (20% < 50%)
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
 
-        // Debug the refund request state
-        uint128 refundRequests = uint128(1); // We know 1 request was created
-        uint128 totalFunders = uint128(3); // We have 3 funders
-        console.log("Refund requests:", refundRequests);
-        console.log("Total funders:", totalFunders);
-        console.log("Minimum required votes:", totalFunders / 2);
-        console.log(
-            "Is request sufficient?",
-            refundRequests >= totalFunders / 2
+        // Attempt to refund should fail
+        vm.prank(user1);
+        vm.expectRevert(Fundl.InsufficientRefundVotes.selector);
+        fundl.refund(projectId);
+    }
+
+    // Test refund halts project
+    function testRefundHaltsProject() public {
+        uint256 user1Amount = 5 ether;
+        uint256 user2Amount = 2 ether;
+        uint256 user3Amount = 5 ether;
+
+        // All users fund
+        vm.prank(user1);
+        token.approve(address(fundl), user1Amount);
+        vm.prank(user1);
+        fundl.fundl(projectId, user1Amount);
+
+        vm.prank(user2);
+        token.approve(address(fundl), user2Amount);
+        vm.prank(user2);
+        fundl.fundl(projectId, user2Amount);
+
+        vm.prank(user3);
+        token.approve(address(fundl), user3Amount);
+        vm.prank(user3);
+        fundl.fundl(projectId, user3Amount);
+
+        // User1 requests refund (5/12 < 50%, not halted yet)
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
+
+        // Project should NOT be halted yet, funding and collection should work
+        // User2 requests refund (now 7/12 > 50% == threshold)
+        vm.prank(user2);
+        fundl.createRefundRequest(projectId);
+
+        // Project should now be halted - new funding should fail
+        vm.prank(user1);
+        token.approve(address(fundl), 1 ether);
+        vm.prank(user1);
+        vm.expectRevert(Fundl.RefundVoteActive.selector);
+        fundl.fundl(projectId, 1 ether);
+
+        // Owner collection should also fail
+        vm.warp(block.timestamp + 30 days);
+        assertEq(fundl.availableToOwner(projectId), 0);
+        vm.expectRevert(Fundl.RefundVoteActive.selector);
+        fundl.collectFunding(projectId);
+    }
+
+    // Test: collect all remaining after endTime
+    function testCollectFundingAfterEndTimeDrainsAll() public {
+        // Fund project fully
+        vm.prank(user1);
+        token.approve(address(fundl), GOAL_AMOUNT);
+        vm.prank(user1);
+        fundl.fundl(projectId, GOAL_AMOUNT);
+
+        // Warp past end time
+        vm.warp(block.timestamp + PROJECT_DURATION + 1 days);
+
+        // Owner collects all remaining unlocked funds
+        uint256 ownerBefore = token.balanceOf(owner);
+        fundl.collectFunding(projectId);
+        uint256 ownerAfter = token.balanceOf(owner);
+
+        // Entire goal should be available (no prior withdrawals)
+        assertEq(ownerAfter - ownerBefore, GOAL_AMOUNT);
+        assertEq(fundl.ownerWithdrawnAmount(projectId), GOAL_AMOUNT);
+    }
+
+    // Test: dynamic resume after refunds drop below threshold
+    function testResumeAfterRefundsDropBelowThreshold() public {
+        vm.prank(user1);
+        token.approve(address(fundl), 6 ether);
+        vm.prank(user1);
+        fundl.fundl(projectId, 6 ether);
+
+        vm.prank(user2);
+        token.approve(address(fundl), 4 ether);
+        vm.prank(user2);
+        fundl.fundl(projectId, 4 ether);
+
+        // user1 requests refund -> threshold met, project halted
+        uint256 u1Before = token.balanceOf(user1);
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
+        assertGt(token.balanceOf(user1), u1Before);
+
+        // Now threshold should drop below 50%; funding and collection resume
+        vm.prank(user3);
+        token.approve(address(fundl), 5 ether);
+        vm.prank(user3);
+        fundl.fundl(projectId, 5 ether);
+
+        // Owner can collect again
+        vm.warp(block.timestamp + 15 days);
+        uint256 ownerBefore = token.balanceOf(owner);
+        fundl.collectFunding(projectId);
+        assertGt(token.balanceOf(owner), ownerBefore);
+    }
+
+    // Test: refund when project balance is zero reverts
+    function testRefundWhenNoProjectBalance() public {
+        // Fund and then owner withdraws all unlocked funds after end
+        vm.prank(user1);
+        token.approve(address(fundl), 40 ether);
+        vm.prank(user1);
+        fundl.fundl(projectId, 40 ether);
+
+        vm.warp(block.timestamp + PROJECT_DURATION + 1 days);
+        fundl.collectFunding(projectId); // withdraw all available
+
+        // Request refund
+        vm.prank(user1);
+        vm.expectRevert(Fundl.NothingToCollect.selector);
+        fundl.createRefundRequest(projectId);
+    }
+
+    // Test: availableToOwner on non-existent project returns 0
+    function testAvailableToOwnerNonExistentProject() public view {
+        assertEq(fundl.availableToOwner(999), 0);
+    }
+
+    // Test: immediate refund on request when threshold is crossed
+    function testImmediateRefundOnThresholdCross() public {
+        uint256 user1Amount = 40 ether;
+        uint256 user2Amount = 10 ether;
+        uint256 totalAmount = user1Amount + user2Amount;
+
+        // user1 funds 40, user2 funds 10 (total 50)
+        vm.prank(user1);
+        token.approve(address(fundl), 40 ether);
+        vm.prank(user1);
+        fundl.fundl(projectId, 40 ether);
+
+        vm.prank(user2);
+        token.approve(address(fundl), 10 ether);
+        vm.prank(user2);
+        fundl.fundl(projectId, 10 ether);
+
+        // user1 requests refund (40/50 = 80% > 50%), triggers threshold
+        uint256 user1BalanceBefore = token.balanceOf(user1);
+        vm.prank(user1);
+        fundl.createRefundRequest(projectId);
+
+        // user1 should be immediately refunded their full contribution
+        uint256 user1BalanceAfter = token.balanceOf(user1);
+        assertEq(
+            user1BalanceAfter - user1BalanceBefore,
+            40 ether,
+            "user1 should be auto-refunded on threshold crossing"
         );
 
-        // This test should pass if we skip the actual refund attempt
-        // But we'll just mark it as passing directly
-        assertTrue(true, "This test passes without trying to do the refund");
+        // user1's contribution and refund flag should be cleared
+        assertEq(fundl.fundingByUsersByProject(projectId, user1), 0);
+        assertFalse(fundl.refundRequestByUsersByProject(projectId, user1));
+
+        // Project should not be halted since only one funder
+        vm.prank(user3);
+        token.approve(address(fundl), 1 ether);
+        vm.prank(user3);
+        fundl.fundl(projectId, 1 ether);
+        assertEq(
+            fundl.fundingByUsersByProject(projectId, user3),
+            1 ether,
+            "Project should not be halted; user3 funding should succeed"
+        );
     }
 }
