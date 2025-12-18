@@ -1,39 +1,51 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import useSWR from "swr";
+import type { ProjectApiResponse } from "@/interfaces/projectApi";
 import { Card } from "@/components/ui/card";
 import { RequestRefundSection } from "./components/RequestRefundSection";
 import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
-import { useProjectData } from "@/hooks/useProjectData";
 import { Loader } from "@/components/Loader";
 import { ErrorDialog } from "@/components/ErrorDialog";
 import { FundProjectSection } from "./components/FundProjectSection";
-import { formatEther } from "viem";
 import { OwnerControls } from "./components/OwnerControls";
 import { ConnectWalletButton } from "@/components/ConnectWalletButtont";
+import { fetcher } from "@/lib/utils";
 
 export default function ProjectPage() {
     const { id } = useParams();
     const { address, isConnected } = useUnifiedWallet();
-    const { project, tokenSymbol, isLoading, error, isOwner, refetch } =
-        useProjectData(id as string, address);
+    const { data, error, isLoading, mutate } = useSWR<ProjectApiResponse>(
+        id ? `${id}/api` : null,
+        fetcher
+    );
+    const project = data?.project;
+    const tokenSymbol = data?.tokenSymbol;
+
+    // Ownership check
+    const isOwner =
+        address &&
+        project?.owner &&
+        address.toLowerCase() === project.owner.toLowerCase();
 
     if (isLoading) {
         return <Loader />;
     }
 
     if (error || !project) {
-        return <ErrorDialog error={error || "Project not found."} />;
+        return <ErrorDialog error={error?.message || "Project not found."} />;
     }
 
     // Calculate funding progress percentage
     const progressPercentage =
-        project &&
-        project.raisedAmount > BigInt(0) &&
-        project.goalAmount > BigInt(0)
+        project && project.raisedAmount > 0 && project.goalAmount > 0
             ? Math.min(
                   Number(
-                      (project.raisedAmount * BigInt(100)) / project.goalAmount
+                      (
+                          (project.raisedAmount * 100) /
+                          project.goalAmount
+                      ).toPrecision(4)
                   ),
                   100
               )
@@ -82,15 +94,13 @@ export default function ProjectPage() {
                                 <div>
                                     <p className="font-bold">Goal Amount:</p>
                                     <p className="font-bold">
-                                        {formatEther(project.goalAmount)}{" "}
-                                        {tokenSymbol}
+                                        {project.goalAmount} {tokenSymbol}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="font-bold">Raised So Far:</p>
                                     <p className="font-bold">
-                                        {formatEther(project.raisedAmount)}{" "}
-                                        {tokenSymbol}
+                                        {project.raisedAmount} {tokenSymbol}
                                     </p>
                                 </div>
                             </div>
@@ -105,9 +115,8 @@ export default function ProjectPage() {
                                     style={{ width: `${progressPercentage}%` }}
                                 ></div>
                                 <div className="absolute inset-0 flex items-center justify-center font-extrabold text-black">
-                                    {formatEther(project.raisedAmount)} /{" "}
-                                    {formatEther(project.goalAmount)}{" "}
-                                    {tokenSymbol}
+                                    {project.raisedAmount} /{" "}
+                                    {project.goalAmount} {tokenSymbol}
                                 </div>
                             </div>
                         </div>
@@ -118,21 +127,17 @@ export default function ProjectPage() {
                 <div className="space-y-6 md:col-span-2">
                     {isConnected ? (
                         isOwner ? (
-                            <OwnerControls
-                                id={id as string}
-                                refetch={refetch}
-                            />
+                            <OwnerControls id={id as string} />
                         ) : (
                             <>
                                 <FundProjectSection
                                     id={id as string}
                                     address={address}
-                                    refetch={refetch}
+                                    refetch={mutate}
                                 />
                                 <RequestRefundSection
-                                    id={id as string}
+                                    projectData={data}
                                     address={address}
-                                    refetch={refetch}
                                 />
                             </>
                         )

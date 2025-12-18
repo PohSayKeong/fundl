@@ -1,7 +1,7 @@
 import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
 import { FundlAddress, FundlABI } from "@/lib/calls";
 import { getChainId } from "@/lib/chainConfig";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     encodeFunctionData,
     formatEther,
@@ -10,16 +10,33 @@ import {
 } from "viem";
 import { getChain } from "@/lib/chainConfig";
 import { Button } from "@/components/ui/button";
-
 interface OwnerControlsProps {
     id: string;
-    refetch: () => Promise<void>;
 }
 
-export const OwnerControls = ({ id, refetch }: OwnerControlsProps) => {
+export const OwnerControls = ({ id }: OwnerControlsProps) => {
     const [availableToCollect, setAvailableToCollect] = useState<string>("0");
     const [isTransactionLoading, setIsTransactionLoading] = useState(false);
     const { sendTransaction } = useUnifiedWallet();
+
+    const calculateAvailableFunds = useCallback(async () => {
+        try {
+            const publicClient = createPublicClient({
+                chain: getChain(),
+                transport: http(),
+            });
+            const result = await publicClient.readContract({
+                address: FundlAddress as `0x${string}`,
+                abi: FundlABI,
+                functionName: "availableToOwner",
+                args: [BigInt(id as string)],
+            });
+            setAvailableToCollect(formatEther(result as bigint));
+        } catch (err) {
+            console.error("Error calculating available funds:", err);
+            setAvailableToCollect("0");
+        }
+    }, [id]);
 
     // Handle collect funds transaction
     const handleCollectFunds = async () => {
@@ -35,7 +52,7 @@ export const OwnerControls = ({ id, refetch }: OwnerControlsProps) => {
                     args: [BigInt(id as string)],
                 }),
             });
-            await refetch();
+            await calculateAvailableFunds();
         } catch (err) {
             console.error("Error collecting funds:", err);
         } finally {
@@ -45,26 +62,8 @@ export const OwnerControls = ({ id, refetch }: OwnerControlsProps) => {
 
     // Calculate available funds to collect (for owner only)
     useEffect(() => {
-        async function calculateAvailableFunds() {
-            try {
-                const publicClient = createPublicClient({
-                    chain: getChain(),
-                    transport: http(),
-                });
-                const result = await publicClient.readContract({
-                    address: FundlAddress as `0x${string}`,
-                    abi: FundlABI,
-                    functionName: "availableToOwner",
-                    args: [BigInt(id as string)],
-                });
-                setAvailableToCollect(formatEther(result as bigint));
-            } catch (err) {
-                console.error("Error calculating available funds:", err);
-                setAvailableToCollect("0");
-            }
-        }
         calculateAvailableFunds();
-    }, [id]);
+    }, [calculateAvailableFunds]);
 
     return (
         <div className="bg-purple-50 border-4 border-black rounded-lg p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">

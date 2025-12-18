@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { formatEther } from "viem";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/projectTypes";
@@ -15,10 +14,13 @@ export const ProjectCard = ({
 }) => {
     // Calculate funding progress percentage
     const progressPercentage =
-        project.raisedAmount > BigInt(0) && project.goalAmount > BigInt(0)
+        project.raisedAmount > 0 && project.goalAmount > 0
             ? Math.min(
                   Number(
-                      (project.raisedAmount * BigInt(100)) / project.goalAmount
+                      (
+                          (project.raisedAmount * 100) /
+                          project.goalAmount
+                      ).toPrecision(4)
                   ),
                   100
               )
@@ -67,8 +69,8 @@ export const ProjectCard = ({
                                 Progress: {progressPercentage}%
                             </span>
                             <span>
-                                {formatEther(project.raisedAmount)} /{" "}
-                                {formatEther(project.goalAmount)} FMT
+                                {project.raisedAmount} / {project.goalAmount}{" "}
+                                FMT
                             </span>
                         </div>
                         <div className="h-6 w-full border-4 border-black bg-white relative">

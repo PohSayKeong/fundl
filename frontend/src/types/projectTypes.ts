@@ -1,18 +1,19 @@
+import { formatEther } from "viem";
+
 // Helper to convert serialized project to project type with proper BigInt values
 export function deserializeProject(
-    serializedProject: SerializedProject
-): Project {
+    serializedProject: SerializedProject,
+    projectId: number
+): ProjectOnChain {
     return {
+        projectId,
         tokenAddress: serializedProject[0] as `0x${string}`,
         owner: serializedProject[1] as `0x${string}`,
-        name: "test", // TODO: fetch from api
-        description: "test description",
-        imageUrl: "https://i.imgur.com/uImH6Zf.jpeg",
-        goalAmount: BigInt(serializedProject[2]),
-        raisedAmount: BigInt(serializedProject[3]),
-        ownerWithdrawn: BigInt(serializedProject[4]),
-        startTime: BigInt(serializedProject[5]),
-        endTime: BigInt(serializedProject[6]),
+        goalAmount: Number(formatEther(BigInt(serializedProject[2]))),
+        raisedAmount: Number(formatEther(BigInt(serializedProject[3]))),
+        ownerWithdrawn: Number(formatEther(BigInt(serializedProject[4]))),
+        startTime: Number(serializedProject[5]),
+        endTime: Number(serializedProject[6]),
     };
 }
 // Project types for Fundl
@@ -27,15 +28,22 @@ export type SerializedProject = [
     endTime: string
 ];
 
-export type Project = {
+export type ProjectOnChain = {
+    projectId: number;
     tokenAddress: `0x${string}`;
     owner: `0x${string}`;
-    name: string;
-    description: string;
-    imageUrl: string;
-    goalAmount: bigint;
-    raisedAmount: bigint;
-    ownerWithdrawn: bigint;
-    startTime: bigint;
-    endTime: bigint;
+    goalAmount: number;
+    raisedAmount: number;
+    ownerWithdrawn: number;
+    startTime: number;
+    endTime: number;
 };
+
+export type ProjectOnDb = {
+    projectId: number;
+    name: string;
+    description?: string | null;
+    imageUrl?: string | null;
+};
+
+export type Project = ProjectOnChain & ProjectOnDb;

@@ -1,34 +1,33 @@
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { useProjectData } from "@/hooks/useProjectData";
 import { useProjectRefund } from "@/hooks/useProjectRefund";
 import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
 import { FundlABI, FundlAddress } from "@/lib/calls";
 import { getChainId } from "@/lib/chainConfig";
 import { useState } from "react";
-import { encodeFunctionData, formatEther } from "viem";
+import { encodeFunctionData } from "viem";
+import { ProjectApiResponse } from "@/interfaces/projectApi";
 
 interface RequestRefundSectionProps {
-    id: string;
+    projectData: ProjectApiResponse;
     address?: string;
-    refetch: () => Promise<void>;
 }
 
 export function RequestRefundSection({
-    id,
+    projectData,
     address,
-    refetch,
 }: RequestRefundSectionProps) {
     const [isTransactionLoading, setIsTransactionLoading] = useState(false);
     const { sendTransaction } = useUnifiedWallet();
-    const { project, tokenSymbol } = useProjectData(id as string, address);
+    const project = projectData.project;
+    const tokenSymbol = projectData.tokenSymbol;
     const {
         refundRequestedByUser,
         userFundedAmount,
         totalRefundRequestedAmount,
         isLoading,
-    } = useProjectRefund(id, address);
-
+        refetch,
+    } = useProjectRefund(project?.projectId, address);
     // Handle request refund transaction
     const handleRequestRefund = async () => {
         try {
@@ -40,7 +39,7 @@ export function RequestRefundSection({
                 data: encodeFunctionData({
                     abi: FundlABI,
                     functionName: "createRefundRequest",
-                    args: [BigInt(id as string)],
+                    args: [BigInt(project?.projectId || 0)],
                 }),
             });
             await refetch();
@@ -55,7 +54,7 @@ export function RequestRefundSection({
         return <Spinner className="mx-auto" />;
     }
 
-    if (!userFundedAmount) {
+    if (!userFundedAmount || !project) {
         return null;
     }
 
@@ -83,11 +82,7 @@ export function RequestRefundSection({
                             ${(
                                 (userFundedAmount /
                                     totalRefundRequestedAmount) *
-                                parseFloat(
-                                    formatEther(
-                                        project?.raisedAmount || BigInt(0)
-                                    )
-                                )
+                                project?.raisedAmount
                             ).toFixed(2)} ${tokenSymbol}`}
                         </p>
                     </div>

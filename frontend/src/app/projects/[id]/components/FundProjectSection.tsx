@@ -12,11 +12,13 @@ import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
 import { encodeFunctionData, parseEther } from "viem";
 import { useState } from "react";
 import { useProjectRefund } from "@/hooks/useProjectRefund";
+import { KeyedMutator } from "swr";
+import { ProjectApiResponse } from "@/interfaces/projectApi";
 
 interface FundProjectSectionProps {
     id: string;
     address?: string;
-    refetch: () => Promise<void>;
+    refetch: KeyedMutator<ProjectApiResponse>;
 }
 
 export function FundProjectSection({
@@ -26,7 +28,7 @@ export function FundProjectSection({
 }: FundProjectSectionProps) {
     const [fundAmount, setFundAmount] = useState("");
     const [isTransactionLoading, setIsTransactionLoading] = useState(false);
-    const { refundRequestedByUser } = useProjectRefund(id, address);
+    const { refundRequestedByUser } = useProjectRefund(Number(id), address);
     const { sendTransaction } = useUnifiedWallet();
 
     const fundProjectCall =
