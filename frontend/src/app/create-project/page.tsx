@@ -1,28 +1,39 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
+import { useIdentityToken } from "@privy-io/react-auth";
 import { getChainId } from "@/lib/chainConfig";
 import { encodeFunctionData, parseEther } from "viem";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FundlABI, FundlAddress, MockTokenAddress } from "@/lib/calls";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
 
 export default function CreateProject() {
-    const { login, sendTransaction, user, ready } = usePrivy();
-    const address = user?.wallet?.address || null;
-    const isConnected = !!address && ready;
-    const [tokenAddress, setTokenAddress] = useState(MockTokenAddress);
+    const {
+        connect,
+        sendTransaction,
+        address,
+        isConnected,
+        txHash,
+        isTransactionConfirmed,
+        resetTransactionStatus,
+    } = useUnifiedWallet();
+    const { identityToken } = useIdentityToken();
+
+    const [goalTarget, setGoalTarget] = useState("");
+    const [endTime, setEndTime] = useState("");
     const [projectName, setProjectName] = useState("");
     const [projectDescription, setProjectDescription] = useState("");
     const [projectImage, setProjectImage] = useState("");
-    const [projectMilestones, setProjectMilestones] = useState("");
-    const [goalTarget, setGoalTarget] = useState("");
     const [isCreating, setIsCreating] = useState(false);
 
-    const handleCreateProject = async () => {
+    const handleCreateProject = async (
+        e: React.MouseEvent<HTMLButtonElement>
+    ) => {
+        e.preventDefault();
         if (!address || !sendTransaction) return;
 
         try {
@@ -31,12 +42,11 @@ export default function CreateProject() {
                 abi: FundlABI,
                 functionName: "createProject",
                 args: [
-                    address as `0x${string}`,
-                    projectName || "",
-                    projectDescription || "",
-                    projectImage || "",
-                    projectMilestones || "",
+                    MockTokenAddress,
                     parseEther(goalTarget || "0"),
+                    endTime
+                        ? Math.floor(new Date(endTime).getTime() / 1000)
+                        : 0,
                 ],
             });
 
@@ -46,19 +56,49 @@ export default function CreateProject() {
                 chainId: getChainId(),
                 data: data,
             });
-
-            // Reset form on success
-            setProjectName("");
-            setProjectDescription("");
-            setProjectImage("");
-            setProjectMilestones("");
-            setGoalTarget("");
         } catch (err) {
             console.error("Error creating project:", err);
-        } finally {
-            setIsCreating(false);
         }
     };
+
+    useEffect(() => {
+        const submitProjectMetadata = async () => {
+            if (isTransactionConfirmed) {
+                // Send metadata to server
+                await fetch("/projects/api", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "privy-id-token": identityToken || "",
+                    },
+                    body: JSON.stringify({
+                        name: projectName,
+                        description: projectDescription,
+                        image: projectImage,
+                        txHash,
+                    }),
+                });
+
+                // Reset form on success
+                setGoalTarget("");
+                setEndTime("");
+                setProjectName("");
+                setProjectDescription("");
+                setProjectImage("");
+                resetTransactionStatus();
+                setIsCreating(false);
+            }
+        };
+        submitProjectMetadata();
+    }, [
+        identityToken,
+        isTransactionConfirmed,
+        projectDescription,
+        projectImage,
+        projectName,
+        resetTransactionStatus,
+        txHash,
+    ]);
 
     return (
         <div className="relative min-h-screen bg-bg p-6">
@@ -82,7 +122,6 @@ export default function CreateProject() {
                                     Project Name
                                 </Label>
                                 <Input
-                                    type="text"
                                     id="projectName"
                                     className="w-full px-4 py-2 border border-border rounded-lg"
                                     placeholder="Enter project name"
@@ -93,13 +132,12 @@ export default function CreateProject() {
                                     required
                                 />
                             </div>
-
                             <div className="form-group">
                                 <Label
                                     htmlFor="projectDescription"
                                     className="block text-xl font-bold text-foreground mb-2"
                                 >
-                                    Project Description (Be Detailed!)
+                                    Project Description
                                 </Label>
                                 <textarea
                                     id="projectDescription"
@@ -113,17 +151,16 @@ export default function CreateProject() {
                                     required
                                 />
                             </div>
-
                             <div className="form-group">
                                 <Label
-                                    htmlFor="imageLink"
+                                    htmlFor="projectImage"
                                     className="block text-xl font-bold text-foreground mb-2"
                                 >
                                     Project Image Link
                                 </Label>
                                 <Input
                                     type="url"
-                                    id="imageLink"
+                                    id="projectImage"
                                     className="w-full px-4 py-2 border border-border rounded-lg"
                                     placeholder="Enter image URL"
                                     value={projectImage}
@@ -135,25 +172,7 @@ export default function CreateProject() {
                             </div>
                             <div className="form-group">
                                 <Label
-                                    htmlFor="Milestones"
-                                    className="block text-xl font-bold text-foreground mb-2"
-                                >
-                                    Number of Milestones
-                                </Label>
-                                <Input
-                                    id="projectMilestones"
-                                    className="w-full px-4 py-2 border border-border rounded-lg"
-                                    placeholder="Enter project milestones"
-                                    value={projectMilestones}
-                                    onChange={(e) =>
-                                        setProjectMilestones(e.target.value)
-                                    }
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <Label
-                                    htmlFor="goal"
+                                    htmlFor="goalTarget"
                                     className="block text-xl font-bold text-foreground mb-2"
                                 >
                                     Goal Amount
@@ -171,31 +190,32 @@ export default function CreateProject() {
                             </div>
                             <div className="form-group">
                                 <Label
-                                    htmlFor="Address"
+                                    htmlFor="endTime"
                                     className="block text-xl font-bold text-foreground mb-2"
                                 >
-                                    Token Address (Optional)
+                                    End Time
                                 </Label>
                                 <Input
-                                    type="text"
-                                    id="Address"
+                                    type="datetime-local"
+                                    id="endTime"
                                     className="w-full px-4 py-2 border border-border rounded-lg"
-                                    placeholder="Enter token address"
-                                    value={tokenAddress}
-                                    onChange={(e) =>
-                                        setTokenAddress(e.target.value)
-                                    }
+                                    placeholder="Select end time"
+                                    value={endTime}
+                                    onChange={(e) => setEndTime(e.target.value)}
                                     required
                                 />
                             </div>
 
                             {isConnected ? (
                                 <Button
-                                    onClick={handleCreateProject}
+                                    onClick={(e) => handleCreateProject(e)}
                                     disabled={
                                         isCreating ||
+                                        !goalTarget ||
+                                        !endTime ||
                                         !projectName ||
-                                        !goalTarget
+                                        !projectDescription ||
+                                        !projectImage
                                     }
                                     className="w-full"
                                 >
@@ -204,7 +224,7 @@ export default function CreateProject() {
                                         : "Create Project"}
                                 </Button>
                             ) : (
-                                <Button onClick={login} className="w-full">
+                                <Button onClick={connect} className="w-full">
                                     Login with Privy to Create Project
                                 </Button>
                             )}

@@ -16,6 +16,7 @@ const projectData: Prisma.ProjectCreateInput[] = [
         projectId: 0,
         description: "A revolutionary AI Agent platform for developers",
         imageUrl: "https://i.imgur.com/9GcO44P.jpeg",
+        owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     },
     {
         name: "Hardware Card Wallets",
@@ -23,12 +24,14 @@ const projectData: Prisma.ProjectCreateInput[] = [
         description:
             "Hardware Wallet that happens to be an NFC Card! All funders who fund 10+ tokens get a free card!",
         imageUrl: "https://i.imgur.com/CPhz19Ng.jpg",
+        owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     },
     {
         name: "Aetheria",
         projectId: 2,
         description: "An open-world blockchain educational game.",
         imageUrl: "https://i.imgur.com/uImH6Zf.jpeg",
+        owner: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     },
 ];
 

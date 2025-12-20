@@ -2,6 +2,7 @@
 CREATE TABLE "Project" (
     "id" TEXT NOT NULL,
     "projectId" INTEGER NOT NULL,
+    "owner" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "name" TEXT NOT NULL,

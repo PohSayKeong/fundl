@@ -16,6 +16,7 @@ datasource db {
 model Project {
   id          String   @id @default(cuid())
   projectId   Int      @unique
+  owner       String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   name        String

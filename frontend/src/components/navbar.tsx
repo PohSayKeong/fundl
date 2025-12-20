@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { usePrivy } from "@privy-io/react-auth";
 
 import {
     NavigationMenu,
@@ -14,6 +13,7 @@ import {
 } from "@/components/ui/navigation-menu";
 
 import { cn } from "@/lib/utils";
+import { useUnifiedWallet } from "@/hooks/useUnifiedWallet";
 
 const components: { title: string; href: string; description: string }[] = [
     {
@@ -31,7 +31,7 @@ const components: { title: string; href: string; description: string }[] = [
 ];
 
 export default function Navbar() {
-    const { ready, authenticated, login, logout, user } = usePrivy();
+    const { isConnected, connect, disconnect } = useUnifiedWallet();
     const [mounted, setMounted] = React.useState(false);
 
     React.useEffect(() => {
@@ -81,7 +81,7 @@ export default function Navbar() {
                         </NavigationMenuContent>
                     </NavigationMenuItem>
                     <NavigationMenuItem>
-                        {!mounted || !ready ? (
+                        {!mounted ? (
                             <div
                                 className={cn(
                                     navigationMenuTriggerStyle(),
@@ -92,9 +92,9 @@ export default function Navbar() {
                                     Loading
                                 </span>
                             </div>
-                        ) : !authenticated ? (
+                        ) : !isConnected ? (
                             <button
-                                onClick={login}
+                                onClick={connect}
                                 className={cn(
                                     navigationMenuTriggerStyle(),
                                     "cursor-pointer"
@@ -106,19 +106,14 @@ export default function Navbar() {
                             </button>
                         ) : (
                             <button
-                                onClick={logout}
+                                onClick={disconnect}
                                 className={cn(
                                     navigationMenuTriggerStyle(),
                                     "cursor-pointer"
                                 )}
                             >
                                 <span className="m750:max-w-[80px] m750:text-xs">
-                                    {user?.wallet?.address
-                                        ? `${user.wallet.address.slice(
-                                              0,
-                                              6
-                                          )}...${user.wallet.address.slice(-4)}`
-                                        : "Logout"}
+                                    Logout
                                 </span>
                             </button>
                         )}

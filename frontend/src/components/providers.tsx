@@ -19,7 +19,7 @@ export function Providers(props: { children: ReactNode }) {
                 // Create embedded wallets for users who don't have a wallet
                 embeddedWallets: {
                     ethereum: {
-                        createOnLogin: "users-without-wallets",
+                        createOnLogin: "all-users",
                     },
                 },
                 defaultChain,
