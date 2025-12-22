@@ -70,3 +70,64 @@ export async function GET(req: NextRequest) {
         );
     }
 }
+
+export async function POST(req: NextRequest) {
+    try {
+        const url = new URL(req.url);
+        const parts = url.pathname.split("/");
+        const projectsIdx = parts.findIndex((p) => p === "projects");
+        const id =
+            projectsIdx !== -1 && parts.length > projectsIdx + 1
+                ? parts[projectsIdx + 1]
+                : null;
+
+        if (!id || isNaN(Number(id))) {
+            return NextResponse.json(
+                { error: "Invalid project id." },
+                { status: 400 }
+            );
+        }
+
+        const projectExists = await prisma.project.findUnique({
+            where: { projectId: Number(id) },
+        });
+
+        if (!projectExists) {
+            return NextResponse.json(
+                { error: "Project not found." },
+                { status: 404 }
+            );
+        }
+
+        const body = await req.json();
+        const { name, description, imageUrl } = body;
+
+        if (!name || !description || !imageUrl) {
+            return NextResponse.json(
+                { error: "Missing required fields." },
+                { status: 400 }
+            );
+        }
+
+        const updatedProject = await prisma.project.update({
+            where: { projectId: Number(id) },
+            data: {
+                name,
+                description,
+                imageUrl,
+            },
+        });
+
+        return NextResponse.json({
+            message: "Project updated successfully.",
+            updatedProject,
+        });
+    } catch (error) {
+        const errorMessage =
+            error instanceof Error ? error.message : String(error);
+        return NextResponse.json(
+            { error: `Failed to update project. ${errorMessage}` },
+            { status: 500 }
+        );
+    }
+}

@@ -127,7 +127,7 @@ export default function ProjectPage() {
                 <div className="space-y-6 md:col-span-2">
                     {isConnected ? (
                         isOwner ? (
-                            <OwnerControls id={id as string} />
+                            <OwnerControls id={id as string} refetch={mutate} />
                         ) : (
                             <>
                                 <FundProjectSection
